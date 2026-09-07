@@ -1,10 +1,12 @@
 """Django settings for the signal_scholar project.
 
-This is intentionally minimal scaffolding (see GitHub issue #1). Database
-configuration beyond the default SQLite, installed apps for domain models,
-and the API layer are handled in follow-up issues.
+This is intentionally minimal scaffolding (see GitHub issue #1). Postgres
+is configured for local development in GitHub issue #2 (see DATABASES
+below); installed apps for domain models and the API layer are handled in
+follow-up issues.
 """
 
+import os
 from pathlib import Path
 
 # src/signal_scholar/settings.py -> repo root is three parents up.
@@ -37,8 +39,12 @@ TEMPLATES = [
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ.get("POSTGRES_DB", "signal_scholar"),
+        "USER": os.environ.get("POSTGRES_USER", "signal_scholar"),
+        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "signal_scholar_dev_password"),
+        "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
+        "PORT": os.environ.get("POSTGRES_PORT", "5432"),
     }
 }
 
