@@ -9,7 +9,7 @@ constraints — since a bare M2M would not need this coverage.
 import pytest
 from django.db import IntegrityError, transaction
 
-from papers.models import Author, Institution, Paper, PaperAuthorship
+from papers.models import Author, Citation, Institution, Paper, PaperAuthorship, Venue
 
 
 @pytest.mark.django_db
@@ -116,3 +116,79 @@ def test_str_representations():
     assert str(paper) == "On Computing Machinery (2020)"
     assert "On Computing Machinery" in str(authorship)
     assert "Ada Lovelace" in str(authorship)
+
+
+# --- Venue / Citation (issue #6) -------------------------------------------
+
+
+@pytest.mark.django_db
+def test_paper_venue_set_null_on_venue_delete():
+    venue = Venue.objects.create(name="NeurIPS")
+    paper = Paper.objects.create(title="A Paper in a Venue", venue=venue)
+
+    assert venue.papers.count() == 1
+
+    venue.delete()
+    paper.refresh_from_db()
+
+    assert paper.venue is None
+
+
+@pytest.mark.django_db
+def test_venue_nullable_openalex_id_allows_multiple_nulls():
+    Venue.objects.create(name="Venue Without OpenAlex ID 1")
+    Venue.objects.create(name="Venue Without OpenAlex ID 2")
+
+    assert Venue.objects.filter(openalex_id__isnull=True).count() == 2
+
+
+@pytest.mark.django_db
+def test_citation_query_both_directions():
+    # A cites B, C also cites B: two independent incoming edges on B, and
+    # one outgoing edge each on A and C.
+    paper_a = Paper.objects.create(title="Paper A")
+    paper_b = Paper.objects.create(title="Paper B")
+    paper_c = Paper.objects.create(title="Paper C")
+
+    Citation.objects.create(citing_paper=paper_a, cited_paper=paper_b)
+    Citation.objects.create(citing_paper=paper_c, cited_paper=paper_b)
+
+    # "papers cited by A" - A's outgoing references.
+    cited_by_a = {row.cited_paper for row in paper_a.citations_made.all()}
+    assert cited_by_a == {paper_b}
+
+    # "papers citing B" - B's incoming citations.
+    citing_b = {row.citing_paper for row in paper_b.citations_received.all()}
+    assert citing_b == {paper_a, paper_c}
+
+
+@pytest.mark.django_db
+def test_citation_self_citation_raises_integrity_error():
+    paper = Paper.objects.create(title="Self-Citing Paper")
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            Citation.objects.create(citing_paper=paper, cited_paper=paper)
+
+
+@pytest.mark.django_db
+def test_citation_duplicate_pair_raises_integrity_error():
+    paper_a = Paper.objects.create(title="Duplicate Citing Paper")
+    paper_b = Paper.objects.create(title="Duplicate Cited Paper")
+
+    Citation.objects.create(citing_paper=paper_a, cited_paper=paper_b)
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            Citation.objects.create(citing_paper=paper_a, cited_paper=paper_b)
+
+
+@pytest.mark.django_db
+def test_venue_and_citation_str_representations():
+    venue = Venue.objects.create(name="NeurIPS")
+    paper_a = Paper.objects.create(title="Citing Paper")
+    paper_b = Paper.objects.create(title="Cited Paper")
+    citation = Citation.objects.create(citing_paper=paper_a, cited_paper=paper_b)
+
+    assert str(venue) == "NeurIPS"
+    assert str(citation) == "Citing Paper -> Cited Paper"

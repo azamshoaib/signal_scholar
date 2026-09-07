@@ -13,6 +13,7 @@ already creates the index we'd otherwise add via ``db_index``.
 """
 
 from django.db import models
+from django.db.models import CheckConstraint, Q
 
 
 class Institution(models.Model):
@@ -48,6 +49,16 @@ class Author(models.Model):
         return self.name
 
 
+class Venue(models.Model):
+    """Where a paper was published, as identified by OpenAlex."""
+
+    name = models.CharField(max_length=500)
+    openalex_id = models.CharField(max_length=255, null=True, blank=True, unique=True)
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class Paper(models.Model):
     """A paper/publication."""
 
@@ -56,6 +67,13 @@ class Paper(models.Model):
     doi = models.CharField(max_length=255, null=True, blank=True, unique=True)
     abstract = models.TextField(null=True, blank=True)
     openalex_id = models.CharField(max_length=255, null=True, blank=True, unique=True)
+    venue = models.ForeignKey(
+        Venue,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="papers",
+    )
     authors = models.ManyToManyField(
         Author,
         through="PaperAuthorship",
@@ -88,3 +106,32 @@ class PaperAuthorship(models.Model):
 
     def __str__(self) -> str:
         return f"{self.paper.title} - {self.author.name} (position {self.position})"
+
+
+class Citation(models.Model):
+    """A directed citation edge: `citing_paper` cites `cited_paper`.
+
+    Self-citation is blocked at the DB level (not just by convention) since
+    ingestion (#9/#10) writes rows directly via the ORM rather than through a
+    form, so a `clean()`-only validation would silently not run on that path
+    (see issue #6's Constraints).
+    """
+
+    citing_paper = models.ForeignKey(
+        Paper, on_delete=models.CASCADE, related_name="citations_made"
+    )
+    cited_paper = models.ForeignKey(
+        Paper, on_delete=models.CASCADE, related_name="citations_received"
+    )
+
+    class Meta:
+        unique_together = (("citing_paper", "cited_paper"),)
+        constraints = [
+            CheckConstraint(
+                condition=~Q(citing_paper=models.F("cited_paper")),
+                name="citation_no_self_citation",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.citing_paper.title} -> {self.cited_paper.title}"
