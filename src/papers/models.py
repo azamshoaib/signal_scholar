@@ -33,6 +33,12 @@ class Author(models.Model):
     current/primary affiliation only — not a historical or
     multi-institution affiliation record (see issue #5's Constraints;
     that gap is deliberately deferred to #30).
+
+    `h_index` and `h_index_normalized` are computed reputation signals
+    (issue #11) derived from this author's papers' `cited_by_count` and
+    `publication_year`. They are stored rather than computed on read
+    because recomputation is its own concern (#14/#28); see
+    `papers.scoring` for the computation itself.
     """
 
     name = models.CharField(max_length=500)
@@ -44,6 +50,8 @@ class Author(models.Model):
         on_delete=models.SET_NULL,
         related_name="authors",
     )
+    h_index = models.PositiveIntegerField(default=0)
+    h_index_normalized = models.FloatField(default=0.0)
 
     def __str__(self) -> str:
         return self.name
