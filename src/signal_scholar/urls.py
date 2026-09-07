@@ -1,11 +1,15 @@
 """Root URL configuration for signal_scholar.
 
-Just a placeholder home view for now to prove the project is wired up
-correctly end to end. The real API layer is added in a follow-up issue.
+The placeholder `home` view stays in place to prove the project is
+wired up correctly end to end. The Django Ninja API layer (see
+`signal_scholar.api`) is mounted alongside it under `/api/`, per
+GitHub issue #4.
 """
 
 from django.http import HttpResponse
 from django.urls import path
+
+from signal_scholar.api import api
 
 
 def home(request):
@@ -14,4 +18,5 @@ def home(request):
 
 urlpatterns = [
     path("", home, name="home"),
+    path("api/", api.urls),
 ]
