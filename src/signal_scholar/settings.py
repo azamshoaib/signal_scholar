@@ -22,6 +22,7 @@ ALLOWED_HOSTS: list[str] = []
 
 INSTALLED_APPS: list[str] = [
     "pgvector_setup",
+    "papers",
 ]
 
 MIDDLEWARE: list[str] = []

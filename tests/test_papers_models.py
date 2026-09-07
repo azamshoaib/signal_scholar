@@ -1,0 +1,118 @@
+"""Model-level tests for the core domain schema.
+
+Per GitHub issue #5: `Paper`, `Author`, `Institution`, and the ordered
+`PaperAuthorship` through-model. These tests focus on the least-standard
+part of the schema — the explicit through-model's ordering and uniqueness
+constraints — since a bare M2M would not need this coverage.
+"""
+
+import pytest
+from django.db import IntegrityError, transaction
+
+from papers.models import Author, Institution, Paper, PaperAuthorship
+
+
+@pytest.mark.django_db
+def test_create_paper_author_institution():
+    institution = Institution.objects.create(name="Aalto University")
+    author = Author.objects.create(name="Ada Lovelace", institution=institution)
+    paper = Paper.objects.create(title="On Computing Machinery", publication_year=2020)
+
+    assert institution.pk is not None
+    assert author.institution == institution
+    assert paper.publication_year == 2020
+    # Nullable fields default to None without being supplied.
+    assert paper.doi is None
+    assert paper.openalex_id is None
+    assert author.openalex_id is None
+
+
+@pytest.mark.django_db
+def test_paper_authors_all_returns_ordered_by_position():
+    paper = Paper.objects.create(title="Ordered Authors Paper")
+    first_author = Author.objects.create(name="First Author")
+    second_author = Author.objects.create(name="Second Author")
+
+    # Create out of position order to prove ordering isn't an artifact of
+    # insertion order.
+    PaperAuthorship.objects.create(paper=paper, author=second_author, position=2)
+    PaperAuthorship.objects.create(paper=paper, author=first_author, position=1)
+
+    assert list(paper.authors.all()) == [first_author, second_author]
+
+
+@pytest.mark.django_db
+def test_paper_authorship_position_unique_per_paper():
+    paper = Paper.objects.create(title="Position Clash Paper")
+    author_a = Author.objects.create(name="Author A")
+    author_b = Author.objects.create(name="Author B")
+
+    PaperAuthorship.objects.create(paper=paper, author=author_a, position=1)
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            PaperAuthorship.objects.create(paper=paper, author=author_b, position=1)
+
+
+@pytest.mark.django_db
+def test_paper_authorship_paper_author_unique_together():
+    paper = Paper.objects.create(title="Duplicate Author Paper")
+    author = Author.objects.create(name="Repeat Author")
+
+    PaperAuthorship.objects.create(paper=paper, author=author, position=1)
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            PaperAuthorship.objects.create(paper=paper, author=author, position=2)
+
+
+@pytest.mark.django_db
+def test_same_position_allowed_across_different_papers():
+    paper_one = Paper.objects.create(title="Paper One")
+    paper_two = Paper.objects.create(title="Paper Two")
+    author = Author.objects.create(name="Shared Author")
+
+    PaperAuthorship.objects.create(paper=paper_one, author=author, position=1)
+    # Position 1 on a *different* paper is fine — the constraint is per-paper.
+    PaperAuthorship.objects.create(paper=paper_two, author=author, position=1)
+
+    assert paper_one.authors.count() == 1
+    assert paper_two.authors.count() == 1
+
+
+@pytest.mark.django_db
+def test_nullable_unique_fields_allow_multiple_nulls():
+    # Postgres allows multiple NULLs under a unique constraint, so
+    # not-yet-matched rows (no OpenAlex ID yet) must not collide.
+    Paper.objects.create(title="Paper Without OpenAlex ID 1")
+    Paper.objects.create(title="Paper Without OpenAlex ID 2")
+    Author.objects.create(name="Author Without OpenAlex ID 1")
+    Author.objects.create(name="Author Without OpenAlex ID 2")
+
+    assert Paper.objects.filter(openalex_id__isnull=True).count() == 2
+    assert Author.objects.filter(openalex_id__isnull=True).count() == 2
+
+
+@pytest.mark.django_db
+def test_author_institution_set_null_on_institution_delete():
+    institution = Institution.objects.create(name="Temporary Institution")
+    author = Author.objects.create(name="Affiliated Author", institution=institution)
+
+    institution.delete()
+    author.refresh_from_db()
+
+    assert author.institution is None
+
+
+@pytest.mark.django_db
+def test_str_representations():
+    institution = Institution.objects.create(name="Aalto University")
+    author = Author.objects.create(name="Ada Lovelace")
+    paper = Paper.objects.create(title="On Computing Machinery", publication_year=2020)
+    authorship = PaperAuthorship.objects.create(paper=paper, author=author, position=1)
+
+    assert str(institution) == "Aalto University"
+    assert str(author) == "Ada Lovelace"
+    assert str(paper) == "On Computing Machinery (2020)"
+    assert "On Computing Machinery" in str(authorship)
+    assert "Ada Lovelace" in str(authorship)
