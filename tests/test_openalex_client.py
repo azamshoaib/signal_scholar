@@ -25,6 +25,7 @@ from openalex_client import (
     get_work,
     search_works,
 )
+from openalex_client.client import _parse_work
 
 
 def _make_response(json_body, status_code: int = 200) -> Mock:
@@ -81,6 +82,51 @@ def _sample_work(
             },
         ],
     }
+
+
+class TestParseWorkCitationCounts:
+    """Per GitHub issue #34: `_parse_work` parses `cited_by_count` and
+    `counts_by_year` straight off the top-level work JSON, defaulting to
+    `0`/`[]` if either key is missing or the wrong shape, rather than
+    raising — a hand-built fixture, no live call.
+    """
+
+    def test_parses_cited_by_count_and_counts_by_year(self):
+        work_json = _sample_work()
+        work_json["cited_by_count"] = 1252
+        work_json["counts_by_year"] = [
+            {"year": 2026, "cited_by_count": 100},
+            {"year": 2025, "cited_by_count": 200},
+        ]
+
+        work = _parse_work(work_json)
+
+        assert work.cited_by_count == 1252
+        assert work.counts_by_year == [
+            {"year": 2026, "cited_by_count": 100},
+            {"year": 2025, "cited_by_count": 200},
+        ]
+
+    def test_missing_keys_default_to_zero_and_empty_list(self):
+        work_json = _sample_work()
+        # Neither key present at all.
+        assert "cited_by_count" not in work_json
+        assert "counts_by_year" not in work_json
+
+        work = _parse_work(work_json)
+
+        assert work.cited_by_count == 0
+        assert work.counts_by_year == []
+
+    def test_wrong_shape_degrades_to_defaults_instead_of_raising(self):
+        work_json = _sample_work()
+        work_json["cited_by_count"] = "not an int"
+        work_json["counts_by_year"] = {"not": "a list"}
+
+        work = _parse_work(work_json)
+
+        assert work.cited_by_count == 0
+        assert work.counts_by_year == []
 
 
 class TestGetWork:

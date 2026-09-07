@@ -53,3 +53,10 @@ class OpenAlexWork:
     # preserves list order rather than re-deriving it from the
     # `author_position` string field ("first"/"middle"/"last").
     authors: list[OpenAlexAuthor] = field(default_factory=list)
+    # Per issue #34: OpenAlex always returns an integer `cited_by_count`
+    # and an array `counts_by_year` (a rolling recent-years window, not
+    # full lifetime history) — defaults here exist only for a work JSON
+    # that's missing either key or has the wrong shape (see
+    # `client._parse_work`'s defensive parsing).
+    cited_by_count: int = 0
+    counts_by_year: list[dict] = field(default_factory=list)

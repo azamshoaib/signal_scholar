@@ -67,6 +67,13 @@ class Paper(models.Model):
     doi = models.CharField(max_length=255, null=True, blank=True, unique=True)
     abstract = models.TextField(null=True, blank=True)
     openalex_id = models.CharField(max_length=255, null=True, blank=True, unique=True)
+    # OpenAlex always returns an integer here (confirmed live, see issue
+    # #34), so this is not nullable. `counts_by_year` stores OpenAlex's
+    # array of `{"year": int, "cited_by_count": int}` objects verbatim —
+    # a rolling recent-years window, not full lifetime history (issue
+    # #34's Constraints).
+    cited_by_count = models.PositiveIntegerField(default=0)
+    counts_by_year = models.JSONField(default=list)
     venue = models.ForeignKey(
         Venue,
         null=True,

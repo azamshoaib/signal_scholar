@@ -154,10 +154,14 @@ class Command(BaseCommand):
         match unrelated rows, since Postgres allows multiple `NULL`s under
         the unique constraint.
 
-        On a match, `title`/`publication_year`/`abstract`/`venue` are
-        overwritten unconditionally with the incoming value; `doi` is
-        resolved via `_resolve_doi` (see its docstring for the conflict
-        rule); `openalex_id` itself is never changed on a matched row.
+        On a match, `title`/`publication_year`/`abstract`/`venue`/
+        `cited_by_count`/`counts_by_year` are overwritten unconditionally
+        with the incoming value — citation counts go stale and should
+        refresh on every re-ingestion (issue #34), same as the other
+        unconditionally-overwritten fields, no `doi`-style conflict
+        handling needed; `doi` is resolved via `_resolve_doi` (see its
+        docstring for the conflict rule); `openalex_id` itself is never
+        changed on a matched row.
         """
         existing = None
         if work.openalex_id is not None:
@@ -171,6 +175,8 @@ class Command(BaseCommand):
                 abstract=work.abstract,
                 openalex_id=work.openalex_id,
                 venue=venue,
+                cited_by_count=work.cited_by_count,
+                counts_by_year=work.counts_by_year,
             )
             return paper, True
 
@@ -179,6 +185,8 @@ class Command(BaseCommand):
         existing.abstract = work.abstract
         existing.venue = venue
         existing.doi = self._resolve_doi(existing.openalex_id, existing.doi, work.doi)
+        existing.cited_by_count = work.cited_by_count
+        existing.counts_by_year = work.counts_by_year
         existing.save()
         return existing, False
 

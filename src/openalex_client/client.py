@@ -151,6 +151,34 @@ def _parse_venue(work_json: dict) -> OpenAlexVenue | None:
     return OpenAlexVenue(openalex_id=_short_id(source.get("id")), name=name)
 
 
+def _parse_cited_by_count(work_json: dict) -> int:
+    """Parse `cited_by_count`, defaulting to `0` if missing or not an int.
+
+    Per issue #34: OpenAlex always returns an integer here, but this
+    degrades defensively rather than raising, matching this file's
+    established pattern (e.g. `_parse_venue`, `_reconstruct_abstract`).
+    `bool` is a subclass of `int` in Python but is not a valid count here,
+    so it's explicitly excluded.
+    """
+    value = work_json.get("cited_by_count")
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return 0
+
+
+def _parse_counts_by_year(work_json: dict) -> list[dict]:
+    """Parse `counts_by_year`, defaulting to `[]` if missing or not a list.
+
+    Per issue #34: stored verbatim as a list of `{"year", "cited_by_count"}`
+    objects — no per-item validation, mirroring this file's other
+    defensive-but-permissive parsing.
+    """
+    value = work_json.get("counts_by_year")
+    if isinstance(value, list):
+        return value
+    return []
+
+
 def _parse_work(work_json: dict) -> OpenAlexWork:
     """Parse one OpenAlex `work` JSON object into an `OpenAlexWork`.
 
@@ -178,6 +206,8 @@ def _parse_work(work_json: dict) -> OpenAlexWork:
         abstract=_reconstruct_abstract(work_json.get("abstract_inverted_index")),
         venue=_parse_venue(work_json),
         authors=authors,
+        cited_by_count=_parse_cited_by_count(work_json),
+        counts_by_year=_parse_counts_by_year(work_json),
     )
 
 
