@@ -82,6 +82,12 @@ class Paper(models.Model):
     # #34's Constraints).
     cited_by_count = models.PositiveIntegerField(default=0)
     counts_by_year = models.JSONField(default=list)
+    # `citations per year since publication` (issue #12): `cited_by_count`
+    # divided by years elapsed since `publication_year`, or `0.0` when
+    # `publication_year` is unknown. Stored rather than computed on read
+    # for the same reason as `Author.h_index_normalized` (#11) —
+    # recomputation is its own concern (#14/#28); see `papers.scoring`.
+    citation_velocity = models.FloatField(default=0.0)
     venue = models.ForeignKey(
         Venue,
         null=True,

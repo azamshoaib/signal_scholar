@@ -13,9 +13,13 @@ from papers.models import Author, Paper, PaperAuthorship
 from papers.scoring import (
     compute_academic_age,
     compute_author_h_index_scores,
+    compute_citation_velocity,
     compute_h_index,
     compute_h_index_normalized,
+    compute_paper_citation_velocity,
+    compute_years_since_publication,
     update_author_h_index,
+    update_paper_citation_velocity,
 )
 
 CURRENT_YEAR = 2026
@@ -186,3 +190,119 @@ def test_first_year_author_academic_age_floored_to_one_no_division_by_zero():
     author.refresh_from_db()
     assert author.h_index == 1
     assert author.h_index_normalized == pytest.approx(1.0)
+
+
+# --- Per-paper citation velocity (issue #12) --------------------------------
+#
+# Fixtures are hand-constructed `Paper` rows with explicit
+# `cited_by_count`/`publication_year` values -- no live API calls.
+# `current_year` is passed explicitly so these tests don't depend on the
+# date they happen to run on.
+
+
+def _make_paper(*, cited_by_count, publication_year):
+    return Paper.objects.create(
+        title=f"Paper ({publication_year}, {cited_by_count} cites)",
+        publication_year=publication_year,
+        cited_by_count=cited_by_count,
+    )
+
+
+# --- Pure-function unit tests (no DB) --------------------------------------
+
+
+def test_compute_years_since_publication_floors_at_one():
+    assert compute_years_since_publication(2011, current_year=2026) == 15
+    assert compute_years_since_publication(2025, current_year=2026) == 1
+    # Published this year -> would be 0 without the floor.
+    assert compute_years_since_publication(2026, current_year=2026) == 1
+    # Bad/future data -> would go negative without the floor.
+    assert compute_years_since_publication(2030, current_year=2026) == 1
+    # No known publication year at all -> undefined, not floored to 1.
+    assert compute_years_since_publication(None, current_year=2026) is None
+
+
+def test_compute_years_since_publication_does_not_use_academic_age_offset():
+    # Unlike #11's academic_age (`current_year - first_year + 1`), this is
+    # `current_year - publication_year` with no +1: a paper published last
+    # year has had ~1 year, not 2.
+    assert compute_years_since_publication(2025, current_year=2026) == 1
+    assert compute_academic_age([2025], current_year=2026) == 2
+
+
+def test_compute_citation_velocity_divides_and_falls_back_to_zero():
+    assert compute_citation_velocity(450, 15) == 30.0
+    assert compute_citation_velocity(120, None) == 0.0
+    assert compute_citation_velocity(0, None) == 0.0
+
+
+# --- The five required scenarios, against real DB fixtures ------------------
+
+
+@pytest.mark.django_db
+def test_old_highly_cited_paper():
+    paper = _make_paper(cited_by_count=450, publication_year=2011)
+
+    velocity = compute_paper_citation_velocity(paper, current_year=CURRENT_YEAR)
+    assert velocity == pytest.approx(30.0)
+
+    update_paper_citation_velocity(paper, current_year=CURRENT_YEAR)
+    paper.refresh_from_db()
+    assert paper.citation_velocity == pytest.approx(30.0)
+
+
+@pytest.mark.django_db
+def test_recent_paper_few_citations():
+    paper = _make_paper(cited_by_count=8, publication_year=2025)
+
+    velocity = compute_paper_citation_velocity(paper, current_year=CURRENT_YEAR)
+    assert velocity == pytest.approx(8.0)
+
+    update_paper_citation_velocity(paper, current_year=CURRENT_YEAR)
+    paper.refresh_from_db()
+    assert paper.citation_velocity == pytest.approx(8.0)
+
+
+@pytest.mark.django_db
+def test_current_year_paper_floored_no_division_by_zero():
+    paper = _make_paper(cited_by_count=3, publication_year=CURRENT_YEAR)
+
+    velocity = compute_paper_citation_velocity(paper, current_year=CURRENT_YEAR)
+    assert velocity == pytest.approx(3.0)
+
+    update_paper_citation_velocity(paper, current_year=CURRENT_YEAR)
+    paper.refresh_from_db()
+    assert paper.citation_velocity == pytest.approx(3.0)
+
+
+@pytest.mark.django_db
+def test_null_publication_year_zeroes_velocity_but_not_cited_by_count():
+    # publication_year is null (allowed per #5): years_since_publication is
+    # undefined and citation_velocity falls back to 0.0 -- the one case
+    # where cited_by_count and citation_velocity visibly diverge.
+    paper = _make_paper(cited_by_count=120, publication_year=None)
+
+    velocity = compute_paper_citation_velocity(paper, current_year=CURRENT_YEAR)
+    assert velocity == 0.0
+    assert paper.cited_by_count == 120
+
+    update_paper_citation_velocity(paper, current_year=CURRENT_YEAR)
+    paper.refresh_from_db()
+    assert paper.citation_velocity == 0.0
+    assert paper.cited_by_count == 120
+
+
+@pytest.mark.django_db
+def test_recent_paper_not_penalized_relative_to_older_paper():
+    # A 1-year-old paper and a 10-year-old paper with proportionally scaled
+    # citation counts get the same velocity -- the recent paper is not
+    # buried under the older paper's larger lifetime total.
+    recent = _make_paper(cited_by_count=20, publication_year=2025)
+    older = _make_paper(cited_by_count=200, publication_year=2016)
+
+    recent_velocity = compute_paper_citation_velocity(recent, current_year=CURRENT_YEAR)
+    older_velocity = compute_paper_citation_velocity(older, current_year=CURRENT_YEAR)
+
+    assert recent_velocity == pytest.approx(20.0)
+    assert older_velocity == pytest.approx(20.0)
+    assert recent_velocity == older_velocity

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import datetime
 
-from papers.models import Author
+from papers.models import Author, Paper
 
 
 def compute_h_index(cited_by_counts: list[int]) -> int:
@@ -122,3 +122,93 @@ def update_author_h_index(
     if save:
         author.save(update_fields=["h_index", "h_index_normalized"])
     return author
+
+
+# --- Per-paper citation velocity (issue #12) --------------------------------
+#
+# A "citations per year since publication" signal per plan.md's Impact
+# Signals section, so a good recent paper isn't buried under lifetime-total
+# comparisons against much older papers just because it hasn't had time to
+# accumulate citations yet.
+#
+# Data source: `Paper.cited_by_count` and `Paper.publication_year` (both
+# added by #34) — not the `Citation` edge model (see #11's Constraints for
+# why) and not `Paper.counts_by_year`, whose bounded recent-years window
+# can't answer "since publication" for an old paper (a separate,
+# recent-momentum signal is tracked as #35).
+
+
+def compute_years_since_publication(
+    publication_year: int | None,
+    current_year: int | None = None,
+) -> int | None:
+    """`current_year - publication_year`, floored to 1. `None` if unknown.
+
+    Deliberately does not use `compute_academic_age`'s `+ 1` offset:
+    that function answers "how many career-years has this author
+    touched" (first year counts as year 1); this one answers "how much
+    elapsed time has this specific paper had to accumulate citations",
+    which is `current_year - publication_year` with no +1 — a paper
+    published last year has had ~1 year, not 2. The floor-to-1 is the
+    only thing carried over from `compute_academic_age`: it keeps a
+    same-year (or bad-data future-dated) paper from causing a
+    division-by-zero or an inflated velocity from a sub-1 divisor.
+
+    `current_year` defaults to the year at call time and is never
+    stored, so a later recompute naturally ages every paper (#14/#28).
+    """
+    if publication_year is None:
+        return None
+
+    if current_year is None:
+        current_year = datetime.date.today().year
+
+    years = current_year - publication_year
+    return max(years, 1)
+
+
+def compute_citation_velocity(
+    cited_by_count: int, years_since_publication: int | None
+) -> float:
+    """`cited_by_count / years_since_publication`, or `0.0` if undefined.
+
+    `years_since_publication` is `None` when `publication_year` is
+    unknown — a defined fallback (not an error), per issue #12,
+    mirroring `compute_h_index_normalized`'s `0.0` fallback (#11). This
+    is the one case where `cited_by_count` (which may be nonzero) and
+    `citation_velocity` visibly diverge.
+    """
+    if years_since_publication is None:
+        return 0.0
+    return cited_by_count / years_since_publication
+
+
+def compute_paper_citation_velocity(
+    paper: Paper, current_year: int | None = None
+) -> float:
+    """Compute `citation_velocity` for `paper` from its own fields.
+
+    Reads `paper.cited_by_count`/`paper.publication_year` directly (both
+    added by #34) — no I/O beyond the already-fetched instance.
+    """
+    years_since_publication = compute_years_since_publication(
+        paper.publication_year, current_year=current_year
+    )
+    return compute_citation_velocity(paper.cited_by_count, years_since_publication)
+
+
+def update_paper_citation_velocity(
+    paper: Paper, current_year: int | None = None, save: bool = True
+) -> Paper:
+    """Recompute and store `citation_velocity` on `paper`.
+
+    Convenience wrapper around `compute_paper_citation_velocity` for
+    actual use (ingestion, admin actions, a future recompute command
+    #14). Set `save=False` to compute without writing to the database.
+    """
+    paper.citation_velocity = compute_paper_citation_velocity(
+        paper, current_year=current_year
+    )
+    if save:
+        paper.save(update_fields=["citation_velocity"])
+    return paper
