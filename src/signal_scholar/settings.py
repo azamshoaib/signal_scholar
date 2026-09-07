@@ -20,7 +20,9 @@ DEBUG = True
 
 ALLOWED_HOSTS: list[str] = []
 
-INSTALLED_APPS: list[str] = []
+INSTALLED_APPS: list[str] = [
+    "pgvector_setup",
+]
 
 MIDDLEWARE: list[str] = []
 
