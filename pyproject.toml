@@ -7,7 +7,11 @@ authors = [
     { name = "azamshoaib", email = "shoaibaza@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "django>=6.1.1",
+    "pytest>=9.1.1",
+    "pytest-django>=4.14.0",
+]
 
 [project.scripts]
 signal-scholar = "signal_scholar:main"
@@ -15,3 +19,7 @@ signal-scholar = "signal_scholar:main"
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
 build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "signal_scholar.settings"
+testpaths = ["tests"]
