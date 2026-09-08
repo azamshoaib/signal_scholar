@@ -9,6 +9,7 @@ Public API:
 
     from openalex_client import (
         search_works,
+        search_works_by_author,
         get_work,
         OpenAlexWork,
         OpenAlexAuthor,
@@ -18,7 +19,7 @@ Public API:
     )
 """
 
-from .client import get_work, search_works
+from .client import get_work, search_works, search_works_by_author
 from .exceptions import OpenAlexClientError
 from .types import OpenAlexAuthor, OpenAlexInstitution, OpenAlexVenue, OpenAlexWork
 
@@ -30,4 +31,5 @@ __all__ = [
     "OpenAlexWork",
     "get_work",
     "search_works",
+    "search_works_by_author",
 ]

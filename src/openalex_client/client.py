@@ -315,3 +315,66 @@ def search_works(query: str, max_results: int = 25) -> list[OpenAlexWork]:
         cursor = next_cursor
 
     return works
+
+
+def search_works_by_author(openalex_author_id: str, max_results: int = 25) -> list[OpenAlexWork]:
+    """Fetch one author's most recent OpenAlex works, newest-first.
+
+    Per issue #26: mirrors `search_works`'s cursor-pagination-until-
+    `max_results` loop verbatim, reusing `_request`/`_parse_work`
+    unchanged — the only difference is the query params sent
+    (`filter=author.id:<id>&sort=publication_date:desc` instead of
+    `search=<query>`). Confirmed live against OpenAlex (2026-09-08) to
+    return the same per-work JSON shape `_parse_work` already handles, to
+    genuinely sort newest-first, and to page correctly via `cursor=*` /
+    `meta.next_cursor` combined with `sort=`.
+
+    `openalex_author_id` is the short form, e.g. `A5048491430`.
+    """
+    if max_results <= 0:
+        return []
+
+    works: list[OpenAlexWork] = []
+    cursor: str | None = "*"
+
+    while cursor and len(works) < max_results:
+        per_page = min(_MAX_PER_PAGE, max_results - len(works))
+        params = {
+            "filter": f"author.id:{openalex_author_id}",
+            "sort": "publication_date:desc",
+            "per-page": per_page,
+            "cursor": cursor,
+        }
+        data, status_code = _request(f"{_BASE_URL}/works", params=params)
+
+        try:
+            page_results = data["results"]
+            next_cursor = data["meta"]["next_cursor"]
+        except (KeyError, TypeError) as exc:
+            raise OpenAlexClientError(
+                f"OpenAlex author-works response missing expected fields: {exc}",
+                status_code=status_code,
+            ) from exc
+
+        if not isinstance(page_results, list):
+            raise OpenAlexClientError(
+                "OpenAlex author-works response 'results' was not a list",
+                status_code=status_code,
+            )
+
+        try:
+            for work_json in page_results:
+                works.append(_parse_work(work_json))
+                if len(works) >= max_results:
+                    break
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            raise OpenAlexClientError(
+                f"Could not parse an OpenAlex work in author-works results: {exc}",
+                status_code=status_code,
+            ) from exc
+
+        if not page_results:
+            break
+        cursor = next_cursor
+
+    return works

@@ -24,6 +24,7 @@ from openalex_client import (
     OpenAlexWork,
     get_work,
     search_works,
+    search_works_by_author,
 )
 from openalex_client.client import _parse_work
 
@@ -290,6 +291,82 @@ class TestSearchWorks:
     def test_max_results_zero_returns_empty_list_without_any_request(self):
         with patch("openalex_client.client.requests.get") as mock_get:
             results = search_works("machine learning", max_results=0)
+
+        assert results == []
+        mock_get.assert_not_called()
+
+
+class TestSearchWorksByAuthor:
+    """Per GitHub issue #26: mocked HTTP only, matching this file's
+    existing convention — no live network call.
+    """
+
+    @patch("openalex_client.client.requests.get")
+    def test_normal_multi_page_fetch_capped_at_max_results(self, mock_get):
+        page_one = {
+            "meta": {"count": 100, "next_cursor": "CURSOR_2"},
+            "results": [
+                _sample_work("https://openalex.org/W1", "Newest"),
+                _sample_work("https://openalex.org/W2", "Second Newest"),
+            ],
+        }
+        page_two = {
+            "meta": {"count": 100, "next_cursor": "CURSOR_3"},
+            "results": [_sample_work("https://openalex.org/W3", "Third Newest")],
+        }
+        mock_get.side_effect = [_make_response(page_one), _make_response(page_two)]
+
+        results = search_works_by_author("A5048491430", max_results=3)
+
+        assert [w.openalex_id for w in results] == ["W1", "W2", "W3"]
+        # Capped at max_results — no third page fetched even though
+        # next_cursor was still non-null after page two.
+        assert mock_get.call_count == 2
+
+        first_params = mock_get.call_args_list[0].kwargs["params"]
+        assert first_params["filter"] == "author.id:A5048491430"
+        assert first_params["sort"] == "publication_date:desc"
+        assert first_params["cursor"] == "*"
+
+        second_params = mock_get.call_args_list[1].kwargs["params"]
+        assert second_params["cursor"] == "CURSOR_2"
+
+    @patch("openalex_client.client.requests.get")
+    def test_fewer_results_than_max_results_no_error(self, mock_get):
+        body = {
+            "meta": {"count": 1, "next_cursor": None},
+            "results": [_sample_work("https://openalex.org/W1", "Only Work")],
+        }
+        mock_get.return_value = _make_response(body)
+
+        results = search_works_by_author("A5048491430", max_results=25)
+
+        assert [w.openalex_id for w in results] == ["W1"]
+        # Stopped after one page since next_cursor was null, not because
+        # max_results was hit.
+        assert mock_get.call_count == 1
+
+    @patch("openalex_client.client.requests.get")
+    def test_malformed_response_raises_client_error(self, mock_get):
+        mock_get.return_value = _make_response({"unexpected": "shape"})
+
+        with pytest.raises(OpenAlexClientError) as exc_info:
+            search_works_by_author("A5048491430")
+
+        assert exc_info.value.status_code == 200
+
+    @patch("openalex_client.client.requests.get")
+    def test_non_2xx_response_raises_client_error(self, mock_get):
+        mock_get.return_value = _make_response({"error": "server error"}, status_code=500)
+
+        with pytest.raises(OpenAlexClientError) as exc_info:
+            search_works_by_author("A5048491430")
+
+        assert exc_info.value.status_code == 500
+
+    def test_max_results_zero_returns_empty_list_without_any_request(self):
+        with patch("openalex_client.client.requests.get") as mock_get:
+            results = search_works_by_author("A5048491430", max_results=0)
 
         assert results == []
         mock_get.assert_not_called()
