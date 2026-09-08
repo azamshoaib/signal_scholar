@@ -13,6 +13,11 @@ from django.db.models import Q
 from pgvector.django import CosineDistance
 
 from papers.models import Paper
+from papers.scoring import (
+    DEFAULT_INFLUENTIAL_CITATION_WEIGHT,
+    DEFAULT_REPUTATION_WEIGHT,
+    DEFAULT_VELOCITY_WEIGHT,
+)
 
 DEFAULT_LIMIT = 25
 MAX_LIMIT = 100
@@ -193,3 +198,63 @@ def find_similar_papers(
         )
 
     return results
+
+
+def paper_score_breakdown(paper: Paper) -> dict:
+    """Build the per-paper score-breakdown context for `_score_breakdown.html`.
+
+    Per GitHub issue #27, this is the Python side of the same duplication
+    the template extraction addresses: `views.detail` (#17) and
+    `views.feed` (#27) both need the identical first-author/h_index-
+    rounding/score-rounding logic, so it lives here exactly once.
+
+    `paper.authorships__author` must already be prefetched by the caller
+    (same N+1-safe convention `search_papers`/`find_similar_papers`
+    already establish above) -- this function only ever does a bare
+    `.all()` on the prefetched `authorships` manager, never
+    `.order_by()`/`.filter()`, which would bypass the prefetch cache and
+    issue a query per paper.
+
+    Returns every key `_score_breakdown.html` needs except
+    `weight_sentence`, which is a request-level constant (not per-paper)
+    computed once by `weight_sentence()` below and passed in separately by
+    the caller.
+    """
+    authorships = list(paper.authorships.all())
+    if authorships:
+        first_author = authorships[0].author
+        first_author_name = first_author.name
+        first_author_h_index_normalized = round(first_author.h_index_normalized, 2)
+    else:
+        first_author_name = "No authors on record"
+        first_author_h_index_normalized = None
+
+    return {
+        "first_author_name": first_author_name,
+        "first_author_h_index_normalized": first_author_h_index_normalized,
+        "author_reputation_score": round(paper.author_reputation_score, 1),
+        "citation_velocity": round(paper.citation_velocity, 2),
+        "velocity_score": round(paper.velocity_score, 1),
+        "influential_citation_ratio": round(paper.influential_citation_ratio, 2),
+        "influential_citation_score": round(paper.influential_citation_score, 1),
+        "combined_score": round(paper.combined_score, 1),
+    }
+
+
+def weight_sentence() -> str:
+    """Build the sentence explaining `combined_score`'s weighting.
+
+    Per GitHub issue #27, extracted verbatim from `views.detail`'s (#17)
+    inline computation so `views.feed` can reuse it -- it reads the same
+    `DEFAULT_REPUTATION_WEIGHT`/`DEFAULT_VELOCITY_WEIGHT`/
+    `DEFAULT_INFLUENTIAL_CITATION_WEIGHT` constants #13 already defined,
+    not a hardcoded copy that could go stale if those are retuned.
+    """
+    reputation_weight = round(DEFAULT_REPUTATION_WEIGHT * 100)
+    velocity_weight = round(DEFAULT_VELOCITY_WEIGHT * 100)
+    influential_citation_weight = round(DEFAULT_INFLUENTIAL_CITATION_WEIGHT * 100)
+    return (
+        f"Combined score = {reputation_weight}% author reputation "
+        f"+ {velocity_weight}% citation velocity "
+        f"+ {influential_citation_weight}% highly-influential-citation ratio."
+    )

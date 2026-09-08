@@ -1,0 +1,40 @@
+{% comment %}
+Per GitHub issue #27, extracted verbatim from `detail.html` (#17) so both
+`detail.html` and `feed.html` can `{% include %}` it. Takes these context
+variables (matching #17's exact fields, and `papers.services.paper_score_breakdown`'s
+keys plus the request-level `weight_sentence`): `first_author_name`,
+`first_author_h_index_normalized`, `author_reputation_score`,
+`citation_velocity`, `velocity_score`, `influential_citation_ratio`,
+`influential_citation_score`, `combined_score`, `weight_sentence`.
+{% endcomment %}
+<h2>Score breakdown</h2>
+<table>
+  <tr>
+    <th>Signal</th>
+    <th>Raw value</th>
+    <th>Normalized (0-100)</th>
+  </tr>
+  <tr>
+    <td>
+      Author reputation &mdash; first author: {{ first_author_name }}
+      {% if first_author_h_index_normalized is not None %}
+        (h-index normalized: {{ first_author_h_index_normalized }})
+      {% endif %}
+    </td>
+    <td>{% if first_author_h_index_normalized is not None %}{{ first_author_h_index_normalized }}{% endif %}</td>
+    <td>{{ author_reputation_score }}</td>
+  </tr>
+  <tr>
+    <td>Citation velocity (citations/year)</td>
+    <td>{{ citation_velocity }}</td>
+    <td>{{ velocity_score }}</td>
+  </tr>
+  <tr>
+    <td>Highly-influential citations (ratio)</td>
+    <td>{{ influential_citation_ratio }}</td>
+    <td>{{ influential_citation_score }}</td>
+  </tr>
+</table>
+
+<h3>Combined score: {{ combined_score }}</h3>
+<p>{{ weight_sentence }}</p>

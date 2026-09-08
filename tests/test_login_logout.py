@@ -73,9 +73,10 @@ def test_login_with_valid_credentials_authenticates_session(client, user, protec
         "/login/", {"username": "alice", "password": "s3cret-pw!"}
     )
 
-    # LOGIN_REDIRECT_URL is "home", the existing root view.
+    # LOGIN_REDIRECT_URL is "papers:feed" (repointed by #27; #42 left this
+    # as "#27's call").
     assert response.status_code == 302
-    assert response.url == reverse("home")
+    assert response.url == reverse("papers:feed")
 
     # The session produced by the real login view is recognized by an
     # auth-gated view: request.user.is_authenticated is true.

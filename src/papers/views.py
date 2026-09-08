@@ -38,19 +38,32 @@ it only ever appears as a fragment inside the detail page. It calls
 exactly as #23's own Constraints anticipated, and checks
 `paper.embedding is None` itself before calling it, since that
 HTTP-agnostic function assumes its caller already did.
+
+Per GitHub issue #27, `feed` renders a signed-in user's personalized
+`/feed/` page: papers connected to the authors/institutions they follow
+(#25's `Follow` model), newest first. It reuses the score-breakdown
+extraction this same issue pulled out of `detail`'s former inline
+computation -- `papers.services.paper_score_breakdown`/`weight_sentence`
+-- so `detail` and `feed` share exactly one implementation of that logic
+instead of two. Gated with `@login_required` (#42's `LOGIN_URL`/
+`LOGIN_REDIRECT_URL`).
 """
 
 from __future__ import annotations
 
+from django.contrib.auth.decorators import login_required
+from django.db.models import F, Q
 from django.shortcuts import get_object_or_404, render
 
-from papers.models import Paper
-from papers.scoring import (
-    DEFAULT_INFLUENTIAL_CITATION_WEIGHT,
-    DEFAULT_REPUTATION_WEIGHT,
-    DEFAULT_VELOCITY_WEIGHT,
+from papers.models import Follow, Paper
+from papers.scoring import DEFAULT_REPUTATION_WEIGHT, DEFAULT_VELOCITY_WEIGHT
+from papers.services import (
+    DEFAULT_LIMIT,
+    find_similar_papers,
+    paper_score_breakdown,
+    search_papers,
+    weight_sentence,
 )
-from papers.services import find_similar_papers, search_papers
 
 
 def _parse_optional_number(raw: str | None, cast):
@@ -134,35 +147,11 @@ def detail(request, pk):
     authorships = list(paper.authorships.all())
     authors = [authorship.author for authorship in authorships]
 
-    if authorships:
-        first_author = authorships[0].author
-        first_author_name = first_author.name
-        first_author_h_index_normalized = round(first_author.h_index_normalized, 2)
-    else:
-        first_author_name = "No authors on record"
-        first_author_h_index_normalized = None
-
-    reputation_weight = round(DEFAULT_REPUTATION_WEIGHT * 100)
-    velocity_weight = round(DEFAULT_VELOCITY_WEIGHT * 100)
-    influential_citation_weight = round(DEFAULT_INFLUENTIAL_CITATION_WEIGHT * 100)
-    weight_sentence = (
-        f"Combined score = {reputation_weight}% author reputation "
-        f"+ {velocity_weight}% citation velocity "
-        f"+ {influential_citation_weight}% highly-influential-citation ratio."
-    )
-
     context = {
         "paper": paper,
         "authors": authors,
-        "first_author_name": first_author_name,
-        "first_author_h_index_normalized": first_author_h_index_normalized,
-        "author_reputation_score": round(paper.author_reputation_score, 1),
-        "citation_velocity": round(paper.citation_velocity, 2),
-        "velocity_score": round(paper.velocity_score, 1),
-        "influential_citation_ratio": round(paper.influential_citation_ratio, 2),
-        "influential_citation_score": round(paper.influential_citation_score, 1),
-        "combined_score": round(paper.combined_score, 1),
-        "weight_sentence": weight_sentence,
+        "weight_sentence": weight_sentence(),
+        **paper_score_breakdown(paper),
     }
 
     return render(request, "papers/detail.html", context)
@@ -183,3 +172,63 @@ def similar(request, pk):
     context = {"results": results}
 
     return render(request, "papers/_similar.html", context)
+
+
+@login_required
+def feed(request):
+    # Per #27: collect the user's followed author/institution ids in two
+    # queries, then a single `Q`-OR filter across the `authorships` join
+    # finds papers matching either. `.distinct()` is required because that
+    # `Q`-OR can multiply rows -- e.g. a paper with two followed authors
+    # would otherwise appear twice.
+    followed_author_ids = Follow.objects.filter(
+        user=request.user, author__isnull=False
+    ).values_list("author_id", flat=True)
+    followed_institution_ids = Follow.objects.filter(
+        user=request.user, institution__isnull=False
+    ).values_list("institution_id", flat=True)
+
+    # Empty state (a) ("follows no one at all") is distinguished from
+    # empty state (b) ("follows someone, but they have no papers yet") by
+    # this existence check, evaluated independently of the papers query
+    # below.
+    follows_anyone = Follow.objects.filter(user=request.user).exists()
+
+    # `select_related`/`prefetch_related` matches `detail`/`search_papers`'s
+    # existing N+1-safe pattern. Ordered by `publication_year` descending
+    # with `nulls_last=True` (via `F(...).desc(nulls_last=True)`) rather
+    # than a naive `-publication_year` -- Postgres's default `DESC` NULL
+    # placement is NULLS FIRST, which would otherwise sort unknown-year
+    # papers to the top and wrongly claim them as "newest". `-id` is the
+    # deterministic tiebreak for same-year papers, matching
+    # `search_papers`'s existing `id`-tiebreak convention.
+    queryset = (
+        Paper.objects.select_related("venue")
+        .prefetch_related("authorships__author")
+        .filter(
+            Q(authorships__author_id__in=followed_author_ids)
+            | Q(authorships__author__institution_id__in=followed_institution_ids)
+        )
+        .distinct()
+        .order_by(F("publication_year").desc(nulls_last=True), "-id")
+    )
+    count = queryset.count()
+    papers = list(queryset[:DEFAULT_LIMIT])
+
+    # The full score breakdown is rendered per card (not just
+    # `combined_score`), reusing `_score_breakdown.html`. `weight_sentence`
+    # is request-level constant, computed once and shared by every card's
+    # include, not recomputed per paper.
+    shared_weight_sentence = weight_sentence()
+    items = [
+        {"paper": paper, "breakdown": paper_score_breakdown(paper)} for paper in papers
+    ]
+
+    context = {
+        "follows_anyone": follows_anyone,
+        "items": items,
+        "count": count,
+        "weight_sentence": shared_weight_sentence,
+    }
+
+    return render(request, "papers/feed.html", context)

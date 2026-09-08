@@ -30,37 +30,7 @@
   <h2>Abstract</h2>
   <p>{% if paper.abstract %}{{ paper.abstract }}{% else %}No abstract available.{% endif %}</p>
 
-  <h2>Score breakdown</h2>
-  <table>
-    <tr>
-      <th>Signal</th>
-      <th>Raw value</th>
-      <th>Normalized (0-100)</th>
-    </tr>
-    <tr>
-      <td>
-        Author reputation &mdash; first author: {{ first_author_name }}
-        {% if first_author_h_index_normalized is not None %}
-          (h-index normalized: {{ first_author_h_index_normalized }})
-        {% endif %}
-      </td>
-      <td>{% if first_author_h_index_normalized is not None %}{{ first_author_h_index_normalized }}{% endif %}</td>
-      <td>{{ author_reputation_score }}</td>
-    </tr>
-    <tr>
-      <td>Citation velocity (citations/year)</td>
-      <td>{{ citation_velocity }}</td>
-      <td>{{ velocity_score }}</td>
-    </tr>
-    <tr>
-      <td>Highly-influential citations (ratio)</td>
-      <td>{{ influential_citation_ratio }}</td>
-      <td>{{ influential_citation_score }}</td>
-    </tr>
-  </table>
-
-  <h3>Combined score: {{ combined_score }}</h3>
-  <p>{{ weight_sentence }}</p>
+  {% include "papers/_score_breakdown.html" %}
 
   <h2>Similar but better papers</h2>
   <button hx-get="{% url 'papers:similar' paper.pk %}"

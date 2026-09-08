@@ -9,6 +9,9 @@ app-boundary precedent #15 set for API code. #17 will add another page
 Per GitHub issue #24, `papers/<id>/similar/` is a dedicated route (not
 `detail`'s existing route branching on `HX-Request`) -- see
 `views.similar`'s own docstring for why.
+
+Per GitHub issue #27, `feed/` is added top-level (matching `search/`'s
+existing top-level convention, not nested under `papers/`).
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ app_name = "papers"
 
 urlpatterns = [
     path("search/", views.search, name="search"),
+    path("feed/", views.feed, name="feed"),
     path("papers/<int:pk>/", views.detail, name="detail"),
     path("papers/<int:pk>/similar/", views.similar, name="similar"),
 ]

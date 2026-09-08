@@ -1,0 +1,30 @@
+{% extends "papers/base.html" %}
+
+{% block title %}Your feed — SignalScholar{% endblock %}
+
+{% block content %}
+  <h1>Your feed</h1>
+
+  {% if not follows_anyone %}
+    <p>You aren't following any authors or institutions yet.</p>
+  {% elif count == 0 %}
+    <p>None of the authors or institutions you follow have any papers yet.</p>
+  {% else %}
+    <p>Showing {{ items|length }} of {{ count }} papers.</p>
+
+    <ul id="feed-list">
+      {% for item in items %}
+        <li>
+          <h2><a href="{% url 'papers:detail' item.paper.id %}">{{ item.paper.title }}</a></h2>
+          <p>
+            {% if item.paper.publication_year %}{{ item.paper.publication_year }}{% else %}Unknown year{% endif %}
+            &middot;
+            {% if item.paper.venue %}{{ item.paper.venue.name }}{% else %}Unknown venue{% endif %}
+          </p>
+
+          {% include "papers/_score_breakdown.html" with first_author_name=item.breakdown.first_author_name first_author_h_index_normalized=item.breakdown.first_author_h_index_normalized author_reputation_score=item.breakdown.author_reputation_score citation_velocity=item.breakdown.citation_velocity velocity_score=item.breakdown.velocity_score influential_citation_ratio=item.breakdown.influential_citation_ratio influential_citation_score=item.breakdown.influential_citation_score combined_score=item.breakdown.combined_score weight_sentence=weight_sentence only %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% endblock %}

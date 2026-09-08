@@ -76,5 +76,10 @@ STATIC_URL = "static/"
 # visitor to an auth-gated page is redirected to /login/ instead of
 # erroring, and a freshly-logged-in user lands somewhere that exists today.
 LOGIN_URL = "login"
-LOGIN_REDIRECT_URL = "home"
+# Per GitHub issue #27 (#42 explicitly left this as "#27's call"): a
+# freshly-logged-in user lands on their personalized feed rather than the
+# placeholder `home` view.
+LOGIN_REDIRECT_URL = "papers:feed"
+# A logged-out user should not be sent to a login-gated page, so this
+# stays "home", unlike LOGIN_REDIRECT_URL above.
 LOGOUT_REDIRECT_URL = "home"
