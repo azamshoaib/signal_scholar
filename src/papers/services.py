@@ -9,15 +9,26 @@ callers.
 
 from __future__ import annotations
 
+from typing import Callable
+
 from django.db.models import Q
 from pgvector.django import CosineDistance
 
-from papers.models import Paper
+from openalex_client import OpenAlexClientError, search_works
+from papers import ingestion
+from papers.models import Author, Paper
 from papers.scoring import (
     DEFAULT_INFLUENTIAL_CITATION_WEIGHT,
     DEFAULT_REPUTATION_WEIGHT,
     DEFAULT_VELOCITY_WEIGHT,
+    update_author_h_index,
+    update_paper_citation_velocity,
+    update_paper_combined_score,
 )
+
+# Capped modestly since this runs synchronously inside a search request --
+# see `search_papers_with_live_fallback`'s docstring.
+LIVE_FALLBACK_MAX_RESULTS = 15
 
 DEFAULT_LIMIT = 25
 MAX_LIMIT = 100
@@ -121,6 +132,127 @@ def search_papers(
         )
 
     return results, count
+
+
+def _recompute_scores_for_papers(papers: list[Paper]) -> None:
+    """Recompute h-index/velocity/combined-score for exactly `papers` and
+    their authors -- a scoped version of `recompute_scores`'s whole-DB
+    three-phase logic (issue #14), run against only the handful of rows
+    a single live-fallback ingest just touched.
+
+    Mirrors that command's ordering constraint exactly: every distinct
+    author across `papers` gets `update_author_h_index` first, fully
+    finished, before any paper's `update_paper_combined_score` runs --
+    otherwise a paper's `author_reputation_score` would read a stale
+    (pre-update) `h_index_normalized` off its first author. See
+    `recompute_scores.py`'s module docstring for the full reasoning.
+    """
+    paper_ids = [paper.id for paper in papers]
+
+    # Phase 1: every distinct author touched by this batch, deduplicated
+    # via a set (a prolific author can appear as first author on more
+    # than one of the newly-ingested papers).
+    authors = Author.objects.filter(papers__id__in=paper_ids).distinct()
+    for author in authors:
+        update_author_h_index(author)
+
+    # Phase 2+3: re-fetch (not reuse) the papers, after phase 1 has fully
+    # committed, so each paper's first author's `h_index_normalized` is
+    # read fresh -- same reasoning as `recompute_scores.py`.
+    fresh_papers = Paper.objects.filter(id__in=paper_ids).prefetch_related(
+        "authorships__author"
+    )
+    for paper in fresh_papers:
+        authorships = list(paper.authorships.all())
+        first_author = authorships[0].author if authorships else None
+        update_paper_citation_velocity(paper, save=False)
+        update_paper_combined_score(paper, first_author, save=False)
+        paper.save(
+            update_fields=[
+                "citation_velocity",
+                "author_reputation_score",
+                "velocity_score",
+                "influential_citation_score",
+                "combined_score",
+            ]
+        )
+
+
+def search_papers_with_live_fallback(
+    q: str,
+    limit: int = DEFAULT_LIMIT,
+    year_min: int | None = None,
+    year_max: int | None = None,
+    velocity_min: float | None = None,
+    on_fallback: Callable[[int], None] | None = None,
+) -> tuple[list[dict], int]:
+    """`search_papers`, but if the local catalog has nothing for `q`, try
+    fetching it live from OpenAlex first.
+
+    Without this, `search_papers` only ever finds what someone has
+    already run `ingest_openalex` for -- a real visitor typing an
+    arbitrary topic just gets "No papers found," even though OpenAlex
+    almost certainly has matching papers. This closes that gap: on a
+    zero-result local search, it calls OpenAlex's live search API for
+    `q` (capped at `LIVE_FALLBACK_MAX_RESULTS`, since this runs
+    synchronously inside the request -- there is no background job queue
+    in this project's stack, see #28's Constraints), ingests whatever
+    comes back through the exact same `papers.ingestion.ingest_works`
+    path `ingest_openalex`/`poll_followed_authors` use, computes scores
+    for just those newly-touched papers/authors
+    (`_recompute_scores_for_papers`, above), and then re-runs the local
+    query so the caller gets one consistent result shape either way.
+
+    Raises the same `ValueError`s as `search_papers` (blank `q`,
+    `year_min > year_max`, negative `velocity_min`) -- those are
+    validation errors unrelated to "no local match yet," so they're
+    allowed to propagate before any live call is attempted.
+
+    If OpenAlex itself has nothing for `q`, or the live call fails for
+    any reason (`OpenAlexClientError` -- network error, rate limit,
+    malformed response), this falls back to the original empty local
+    result rather than raising -- a slow/unavailable OpenAlex should
+    degrade to "no results," never a 500.
+
+    `on_fallback`, when given, is called with the number of works
+    fetched live whenever the fallback actually fires (0 if OpenAlex
+    also had nothing) -- callers can use this for a "results were just
+    indexed" UI hint. Defaults to a no-op.
+
+    Known limitation, not fixed here: `search_papers`'s own matching is
+    naive `icontains` on `title`/`abstract` (#36), so it's possible for
+    OpenAlex to return works relevant to `q` whose title/abstract don't
+    literally contain that substring -- those get ingested and scored
+    like everything else, but the re-run local query still won't surface
+    them until a search that does match their text terms finds them.
+    A single live-search call is also not rate-limited or cached beyond
+    "once ingested, it's local from then on" -- repeated distinct
+    zero-result queries each trigger a fresh OpenAlex call.
+    """
+    if on_fallback is None:
+        on_fallback = lambda _work_count: None  # noqa: E731
+
+    results, count = search_papers(q, limit, year_min, year_max, velocity_min)
+    if count > 0:
+        return results, count
+
+    try:
+        works = search_works(q.strip(), max_results=LIVE_FALLBACK_MAX_RESULTS)
+    except OpenAlexClientError:
+        works = []
+
+    on_fallback(len(works))
+    if not works:
+        return results, count
+
+    ingestion.ingest_works(works)
+
+    touched_ids = [work.openalex_id for work in works if work.openalex_id]
+    touched_papers = list(Paper.objects.filter(openalex_id__in=touched_ids))
+    if touched_papers:
+        _recompute_scores_for_papers(touched_papers)
+
+    return search_papers(q, limit, year_min, year_max, velocity_min)
 
 
 def find_similar_papers(

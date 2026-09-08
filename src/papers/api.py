@@ -28,7 +28,7 @@ from papers.services import (
     DEFAULT_LIMIT,
     RESULT_COUNT,
     find_similar_papers,
-    search_papers,
+    search_papers_with_live_fallback,
 )
 
 router = Router()
@@ -69,7 +69,9 @@ def search(
     """
     q = q.strip()
     try:
-        results, count = search_papers(q, limit, year_min, year_max, velocity_min)
+        results, count = search_papers_with_live_fallback(
+            q, limit, year_min, year_max, velocity_min
+        )
     except ValueError as exc:
         raise HttpError(400, str(exc)) from None
 

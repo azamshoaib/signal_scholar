@@ -61,7 +61,7 @@ from papers.services import (
     DEFAULT_LIMIT,
     find_similar_papers,
     paper_score_breakdown,
-    search_papers,
+    search_papers_with_live_fallback,
     weight_sentence,
 )
 
@@ -95,7 +95,7 @@ def search(request):
     searched = bool(q_stripped)
     if searched:
         try:
-            results, count = search_papers(
+            results, count = search_papers_with_live_fallback(
                 q_stripped,
                 limit=25,
                 year_min=year_min,
