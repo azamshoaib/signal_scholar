@@ -1,0 +1,20 @@
+# SignalScholar recurring jobs.
+#
+# Installable on a real deployed host via: crontab deploy/crontab
+#
+# NOTE: /path/to/signal_scholar below is a placeholder. Before installing on
+# an actual host, replace it with that host's absolute checkout path. Times
+# are cron's usual server-local schedule (UTC unless the host is configured
+# with a different timezone) — see _docs/scheduling.md for the reasoning
+# behind these schedules and how to change them.
+#
+# recompute_scores: daily at 03:00, off-peak. Its inputs (e.g. citation
+# velocity's age-based calculation) only meaningfully change once a day, so
+# running it more often would just burn compute for no observable change.
+0 3 * * * cd /path/to/signal_scholar && deploy/run_management_command.sh recompute_scores >> logs/cron.log 2>&1
+
+# poll_followed_authors: hourly, on the hour. It calls the external,
+# rate-limited OpenAlex API once per followed author, so hourly balances
+# staying within OpenAlex's rate limits against not leaving newly published
+# papers undiscovered for too long.
+0 * * * * cd /path/to/signal_scholar && deploy/run_management_command.sh poll_followed_authors >> logs/cron.log 2>&1

@@ -15,3 +15,5 @@ Rules
 Documents
 
 - `_docs/process.md` - how work is organized
+- `_docs/scheduling.md` - how recurring jobs (recompute_scores,
+  poll_followed_authors) are scheduled
