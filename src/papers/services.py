@@ -33,14 +33,19 @@ logger = logging.getLogger(__name__)
 # deployment (2026-09-09): each work ingested costs several sequential DB
 # round trips (one `get_or_create` per paper/author/institution/venue),
 # and over a real network to a managed Postgres those add up fast inside
-# one synchronous request -- measured ~0.25-0.3s per round trip. A
-# handful of works from a highly-collaborative field (47 authors across 5
-# materials-science papers, observed live) was enough to approach a
-# platform-enforced request timeout on its own; capping `max_results`
+# one synchronous request -- measured ~0.25-0.3s per round trip locally,
+# but noticeably more end to end over a real HTTP request through the
+# host's edge/proxy (observed: a 5-work/5-author-cap version that timed
+# at ~15s in a direct script still hit ~25-30s, and occasionally a 502,
+# over real HTTP -- so these are deliberately tighter than the fastest
+# thing that worked in isolated timing, to leave real margin). A handful
+# of works from a highly-collaborative field (47 authors across 5
+# materials-science papers, observed live) was enough on its own to
+# approach a platform-enforced request timeout; capping `max_results`
 # alone doesn't bound that, since it's author *count* that dominates, not
 # work count. See `search_papers_with_live_fallback`'s docstring.
-LIVE_FALLBACK_MAX_RESULTS = 5
-MAX_AUTHORS_PER_WORK_FOR_LIVE_FALLBACK = 5
+LIVE_FALLBACK_MAX_RESULTS = 3
+MAX_AUTHORS_PER_WORK_FOR_LIVE_FALLBACK = 3
 
 DEFAULT_LIMIT = 25
 MAX_LIMIT = 100
