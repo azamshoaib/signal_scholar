@@ -1,0 +1,24 @@
+{% extends "papers/base.html" %}
+
+{% block title %}Log in — SignalScholar{% endblock %}
+
+{% block content %}
+  <h1>Log in</h1>
+
+  {% if form.errors %}
+    <p>Your username and password didn't match. Please try again.</p>
+  {% endif %}
+
+  <form method="post" action="{% url 'login' %}">
+    {% csrf_token %}
+
+    <label for="id_username">Username</label>
+    {{ form.username }}
+
+    <label for="id_password">Password</label>
+    {{ form.password }}
+
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit">Log in</button>
+  </form>
+{% endblock %}

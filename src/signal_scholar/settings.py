@@ -45,7 +45,7 @@ ROOT_URLCONF = "signal_scholar.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "src" / "signal_scholar" / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -70,3 +70,11 @@ DATABASES = {
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 STATIC_URL = "static/"
+
+# Per GitHub issue #42: a public-facing login flow (mounted in
+# signal_scholar/urls.py at /login/ and /logout/) so an unauthenticated
+# visitor to an auth-gated page is redirected to /login/ instead of
+# erroring, and a freshly-logged-in user lands somewhere that exists today.
+LOGIN_URL = "login"
+LOGIN_REDIRECT_URL = "home"
+LOGOUT_REDIRECT_URL = "home"
