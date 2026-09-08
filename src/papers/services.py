@@ -9,6 +9,7 @@ callers.
 
 from __future__ import annotations
 
+import logging
 from typing import Callable
 
 from django.db.models import Q
@@ -25,6 +26,8 @@ from papers.scoring import (
     update_paper_citation_velocity,
     update_paper_combined_score,
 )
+
+logger = logging.getLogger(__name__)
 
 # Capped modestly since this runs synchronously inside a search request --
 # see `search_papers_with_live_fallback`'s docstring.
@@ -239,20 +242,33 @@ def search_papers_with_live_fallback(
     try:
         works = search_works(q.strip(), max_results=LIVE_FALLBACK_MAX_RESULTS)
     except OpenAlexClientError:
+        logger.warning("Live OpenAlex search failed for q=%r", q, exc_info=True)
         works = []
 
     on_fallback(len(works))
     if not works:
         return results, count
 
-    ingestion.ingest_works(works)
-
-    touched_ids = [work.openalex_id for work in works if work.openalex_id]
-    touched_papers = list(Paper.objects.filter(openalex_id__in=touched_ids))
-    if touched_papers:
-        _recompute_scores_for_papers(touched_papers)
-
-    return search_papers(q, limit, year_min, year_max, velocity_min)
+    # Ingestion and scoring are a best-effort enhancement on top of an
+    # already-valid (empty) search result -- any failure here (a DB
+    # hiccup, a malformed upstream record, anything unanticipated) must
+    # degrade back to that empty result, never surface as a 500 to a
+    # search request. `search_works` above only guards its own call;
+    # this guards everything after it.
+    try:
+        ingestion.ingest_works(works)
+        touched_ids = [work.openalex_id for work in works if work.openalex_id]
+        touched_papers = list(Paper.objects.filter(openalex_id__in=touched_ids))
+        if touched_papers:
+            _recompute_scores_for_papers(touched_papers)
+        return search_papers(q, limit, year_min, year_max, velocity_min)
+    except Exception:
+        logger.exception(
+            "Live-fallback ingest/score failed for q=%r after fetching %d works",
+            q,
+            len(works),
+        )
+        return results, count
 
 
 def find_similar_papers(

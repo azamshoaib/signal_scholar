@@ -8,6 +8,8 @@ exercise the live-fallback path itself without a real network call.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from openalex_client import OpenAlexClientError, OpenAlexWork
@@ -142,3 +144,41 @@ def test_re_run_after_fallback_matches_plain_search_papers(
 
     assert fallback_results == plain_results
     assert fallback_count == plain_count
+
+
+@pytest.mark.django_db
+def test_ingestion_failure_degrades_to_empty_result_not_raise(
+    _no_live_openalex_search_by_default,
+):
+    """A production incident: any failure during ingest/score must not
+    surface as a 500 to a search request -- the fallback is a best-effort
+    enhancement on top of an already-valid empty result."""
+    _no_live_openalex_search_by_default.return_value = [
+        _work("W1", "Some paper", cited_by_count=1),
+    ]
+
+    with patch(
+        "papers.services.ingestion.ingest_works", side_effect=RuntimeError("boom")
+    ):
+        results, count = search_papers_with_live_fallback("some topic")
+
+    assert results == []
+    assert count == 0
+
+
+@pytest.mark.django_db
+def test_scoring_failure_degrades_to_empty_result_not_raise(
+    _no_live_openalex_search_by_default,
+):
+    _no_live_openalex_search_by_default.return_value = [
+        _work("W1", "Some paper", cited_by_count=1),
+    ]
+
+    with patch(
+        "papers.services._recompute_scores_for_papers",
+        side_effect=RuntimeError("boom"),
+    ):
+        results, count = search_papers_with_live_fallback("some other topic")
+
+    assert results == []
+    assert count == 0
