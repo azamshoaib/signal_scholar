@@ -61,4 +61,12 @@
 
   <h3>Combined score: {{ combined_score }}</h3>
   <p>{{ weight_sentence }}</p>
+
+  <h2>Similar but better papers</h2>
+  <button hx-get="{% url 'papers:similar' paper.pk %}"
+          hx-target="#similar-results"
+          hx-swap="innerHTML">
+    Find similar but better papers
+  </button>
+  <div id="similar-results"></div>
 {% endblock %}

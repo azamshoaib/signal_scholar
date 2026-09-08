@@ -28,6 +28,16 @@ function -- nothing else in the app currently needs the same query
 (see issue #17's Constraints on why extracting a service now would be
 speculative generality), and it is a single plain `GET` with no HTMX
 partial to render.
+
+Per GitHub issue #24, `similar` renders the "similar but better" papers
+HTMX partial for `detail.html`'s button. It is a dedicated route (not
+`detail`'s route branching on `HX-Request`), since -- unlike
+`/search/?q=...` -- this URL has no full-page/bookmarkable counterpart:
+it only ever appears as a fragment inside the detail page. It calls
+`papers.services.find_similar_papers` directly (never `papers.api`),
+exactly as #23's own Constraints anticipated, and checks
+`paper.embedding is None` itself before calling it, since that
+HTTP-agnostic function assumes its caller already did.
 """
 
 from __future__ import annotations
@@ -40,7 +50,7 @@ from papers.scoring import (
     DEFAULT_REPUTATION_WEIGHT,
     DEFAULT_VELOCITY_WEIGHT,
 )
-from papers.services import search_papers
+from papers.services import find_similar_papers, search_papers
 
 
 def _parse_optional_number(raw: str | None, cast):
@@ -156,3 +166,20 @@ def detail(request, pk):
     }
 
     return render(request, "papers/detail.html", context)
+
+
+def similar(request, pk):
+    # A single `get_object_or_404` lookup, no `select_related`/
+    # `prefetch_related` -- this view never renders the *source* paper's
+    # own venue/authors, only the candidate results `find_similar_papers`
+    # already returns fully assembled as plain dicts.
+    paper = get_object_or_404(Paper, pk=pk)
+
+    if paper.embedding is None:
+        results = None
+    else:
+        results = find_similar_papers(paper)
+
+    context = {"results": results}
+
+    return render(request, "papers/_similar.html", context)

@@ -1,0 +1,19 @@
+{% if results is None %}
+  <p>This paper has no stored embedding yet, so it can't be compared for similarity.</p>
+{% elif not results %}
+  <p>No similar papers found.</p>
+{% else %}
+  <ul id="similar-results-list">
+    {% for paper in results %}
+      <li data-paper-id="{{ paper.id }}">
+        <h3><a href="{% url 'papers:detail' paper.id %}">{{ paper.title }}</a></h3>
+        <p>{{ paper.first_author_name }} &middot; {{ paper.venue_name }} &middot; {{ paper.publication_year }}</p>
+        <p>
+          <span class="score-value">Score: {{ paper.combined_score|floatformat:1 }}</span>
+          &middot;
+          <span class="similarity-value">Similarity: {{ paper.similarity_score|floatformat:2 }}</span>
+        </p>
+      </li>
+    {% endfor %}
+  </ul>
+{% endif %}
