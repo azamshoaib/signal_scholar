@@ -1,21 +1,124 @@
 {% extends "papers/base.html" %}
+{% load static %}
 
-{% block title %}SignalScholar{% endblock %}
+{% block title %}SignalScholar — find the papers that actually matter{% endblock %}
+
+{% block extra_head %}
+  <link rel="stylesheet" href="{% static 'papers/landing.css' %}">
+{% endblock %}
 
 {% block content %}
-  <h1>SignalScholar</h1>
-  <p>A research discovery tool that ranks papers by author reputation and
-  impact signals, not just raw citation counts.</p>
+<div class="landing">
+  <div class="blob-field" aria-hidden="true">
+    <div class="blob blob--a"></div>
+    <div class="blob blob--b"></div>
+    <div class="blob blob--c"></div>
+  </div>
 
-  <nav>
-    <ul>
-      <li><a href="{% url 'papers:search' %}">Search papers</a></li>
+  <nav class="landing__nav">
+    <div class="brand">
+      <span class="brand__mark" aria-hidden="true"></span>
+      SignalScholar
+    </div>
+    <div class="landing__nav-links">
+      <a href="#how-it-works">How it works</a>
+      <a href="{% url 'papers:search' %}">Search</a>
       {% if user.is_authenticated %}
-        <li><a href="{% url 'papers:feed' %}">Your feed</a></li>
-        <li><a href="{% url 'logout' %}">Log out</a></li>
+        <a href="{% url 'papers:feed' %}">Feed</a>
+        <a href="{% url 'logout' %}">Log out</a>
       {% else %}
-        <li><a href="{% url 'login' %}">Log in</a></li>
+        <a href="{% url 'login' %}">Log in</a>
       {% endif %}
-    </ul>
+    </div>
   </nav>
+
+  <header class="hero">
+    <span class="eyebrow"><span class="eyebrow__dot" aria-hidden="true"></span> Built for grad students &amp; early-career researchers</span>
+    <h1>Find the papers that <span class="gradient-word">actually matter.</span></h1>
+    <p>SignalScholar ranks research by author reputation and real impact signals — not just raw citation counts — so strong recent work doesn't get buried under old, over-cited noise.</p>
+    <div class="hero__actions">
+      <a class="btn btn--primary" href="{% url 'papers:search' %}">Search papers →</a>
+      <a class="btn btn--ghost" href="#how-it-works">See how it works</a>
+    </div>
+
+    <div class="waveform" aria-hidden="true">
+      <svg viewBox="0 0 780 140" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="signal-gradient" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#6a5bff" />
+            <stop offset="55%" stop-color="#22e8c8" />
+            <stop offset="100%" stop-color="#ff5b9e" />
+          </linearGradient>
+        </defs>
+        <path class="waveform__line" d="M0,90 C60,90 60,30 120,30 C170,30 170,110 220,110 C270,110 270,50 330,50 C380,50 380,95 430,95 C480,95 480,20 540,20 C590,20 590,80 640,80 C690,80 690,60 780,60" />
+        <circle class="waveform__dot" cx="780" cy="60" r="5" />
+      </svg>
+    </div>
+  </header>
+
+  <section class="landing__section" id="how-it-works">
+    <div class="section-heading">
+      <h2>Three signals, one transparent score</h2>
+      <p>Every ranked paper shows exactly why it landed where it did — no black box.</p>
+    </div>
+    <div class="features">
+      <article class="card card--a">
+        <div class="card__icon">🎓</div>
+        <h3>Author reputation</h3>
+        <p>h-index normalized by academic age, so a strong early-career researcher isn't buried under a senior PI who's simply had more career-years to accumulate citations.</p>
+      </article>
+      <article class="card card--b">
+        <div class="card__icon">📈</div>
+        <h3>Citation velocity</h3>
+        <p>Citations per year since publication, not lifetime total — so a great paper from last year isn't outranked by a mediocre one that's just had a decade to rack up citations.</p>
+      </article>
+      <article class="card card--c">
+        <div class="card__icon">🎯</div>
+        <h3>Influential-citation ratio</h3>
+        <p>How often a paper is genuinely built on, not just name-dropped in a related-work paragraph — filtering out citations that are passing mentions rather than real influence.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="landing__section steps">
+    <div class="section-heading">
+      <h2>From search to trusted feed</h2>
+    </div>
+    <div class="steps__list">
+      <div class="step">
+        <div class="step__num"></div>
+        <h3>Search a topic</h3>
+        <p>Get results ranked by signal, not just recency — with filters for year range and minimum citation velocity.</p>
+      </div>
+      <div class="step">
+        <div class="step__num"></div>
+        <h3>See the breakdown</h3>
+        <p>Every paper's detail page shows the exact weighted math behind its score, plus papers that are similar but ranked better.</p>
+      </div>
+      <div class="step">
+        <div class="step__num"></div>
+        <h3>Follow who you trust</h3>
+        <p>Follow specific authors and institutions to build a personalized feed of their new work as it's published.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta">
+    <div class="cta__panel">
+      <h2>Stop scrolling past the good stuff.</h2>
+      <p>Search SignalScholar and see the difference a real ranking signal makes.</p>
+      <div class="hero__actions">
+        <a class="btn btn--primary" href="{% url 'papers:search' %}">Search papers →</a>
+      </div>
+    </div>
+  </section>
+
+  <footer class="landing__footer">
+    SignalScholar — a research discovery tool for cutting through citation-count noise.
+  </footer>
+</div>
+{% endblock %}
+
+{% block extra_body %}
+  <script src="{% static 'papers/landing.js' %}"></script>
 {% endblock %}
