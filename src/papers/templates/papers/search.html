@@ -10,13 +10,13 @@
     <input type="text" id="q" name="q" value="{{ q }}">
 
     <label for="year_min">Year (min)</label>
-    <input type="number" id="year_min" name="year_min" value="{{ year_min }}">
+    <input type="number" id="year_min" name="year_min" value="{{ year_min|default_if_none:"" }}">
 
     <label for="year_max">Year (max)</label>
-    <input type="number" id="year_max" name="year_max" value="{{ year_max }}">
+    <input type="number" id="year_max" name="year_max" value="{{ year_max|default_if_none:"" }}">
 
     <label for="velocity_min">Min. citation velocity</label>
-    <input type="number" id="velocity_min" name="velocity_min" min="0" step="any" value="{{ velocity_min }}">
+    <input type="number" id="velocity_min" name="velocity_min" min="0" step="any" value="{{ velocity_min|default_if_none:"" }}">
 
     <button type="submit">Search</button>
   </form>

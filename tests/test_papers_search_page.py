@@ -267,6 +267,20 @@ def test_filter_values_round_trip_into_form_inputs(client):
 
 
 @pytest.mark.django_db
+def test_omitted_filter_values_round_trip_as_empty_not_none(client):
+    Paper.objects.create(title="Robotics paper", publication_year=2020)
+
+    response = client.get("/search/", {"q": "robotics", "year_min": 2015})
+    body = response.content.decode()
+
+    assert response.status_code == 200
+    assert 'id="year_min" name="year_min" value="2015"' in body
+    assert 'id="year_max" name="year_max" value=""' in body
+    assert 'id="velocity_min" name="velocity_min" min="0" step="any" value=""' in body
+    assert 'value="None"' not in body
+
+
+@pytest.mark.django_db
 def test_omitting_all_filters_reproduces_prior_behavior(client):
     Paper.objects.create(title="Robotics paper", publication_year=2020)
 
