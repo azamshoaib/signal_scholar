@@ -360,7 +360,7 @@ def test_combined_score_increases_with_velocity_until_saturation():
             title=f"Paper (velocity={velocity})", citation_velocity=velocity
         )
         PaperAuthorship.objects.create(paper=paper, author=author, position=1)
-        update_paper_combined_score(paper)
+        update_paper_combined_score(paper, author)
         return paper.combined_score
 
     below_saturation = [0.0, 10.0, 25.0, CITATION_VELOCITY_REFERENCE_MAX]
@@ -389,7 +389,7 @@ def test_combined_score_increases_with_reputation_until_saturation():
             title=f"Paper (h_norm={h_index_normalized})", citation_velocity=velocity
         )
         PaperAuthorship.objects.create(paper=paper, author=author, position=1)
-        update_paper_combined_score(paper)
+        update_paper_combined_score(paper, author)
         return paper.combined_score
 
     below_saturation = [0.0, 1.0, 2.5, H_INDEX_NORMALIZED_REFERENCE_MAX]
@@ -418,7 +418,7 @@ def test_author_reputation_score_uses_first_author_only_not_max_or_average():
     PaperAuthorship.objects.create(paper=paper, author=lower_coauthor, position=2)
     PaperAuthorship.objects.create(paper=paper, author=higher_coauthor, position=3)
 
-    score = compute_paper_author_reputation_score(paper)
+    score = compute_paper_author_reputation_score(first_author)
 
     expected_first_author_score = normalize_h_index_score(2.0)
     what_max_would_give = normalize_h_index_score(4.0)
@@ -434,9 +434,9 @@ def test_zero_authorship_paper_reputation_score_zero_and_combined_drops_term():
     # No PaperAuthorship rows at all (allowed per #5's schema).
     paper = Paper.objects.create(title="No authors", citation_velocity=20.0)
 
-    assert compute_paper_author_reputation_score(paper) == 0.0
+    assert compute_paper_author_reputation_score(None) == 0.0
 
-    update_paper_combined_score(paper)
+    update_paper_combined_score(paper, None)
     paper.refresh_from_db()
 
     expected_velocity_score = normalize_velocity_score(20.0)
@@ -458,7 +458,7 @@ def test_paper_with_outlier_velocity_and_reputation_both_saturate_at_100():
     paper = Paper.objects.create(title="Outlier paper", citation_velocity=500.0)
     PaperAuthorship.objects.create(paper=paper, author=outlier_author, position=1)
 
-    update_paper_combined_score(paper)
+    update_paper_combined_score(paper, outlier_author)
     paper.refresh_from_db()
 
     assert paper.author_reputation_score == 100.0
@@ -477,7 +477,7 @@ def test_combined_score_hand_computed_example():
     paper = Paper.objects.create(title="Hand-computed paper", citation_velocity=20.0)
     PaperAuthorship.objects.create(paper=paper, author=author, position=1)
 
-    update_paper_combined_score(paper)
+    update_paper_combined_score(paper, author)
     paper.refresh_from_db()
 
     assert paper.author_reputation_score == pytest.approx(50.0)
@@ -494,7 +494,7 @@ def test_update_paper_combined_score_save_false_does_not_persist():
     paper = Paper.objects.create(title="Paper", citation_velocity=20.0)
     PaperAuthorship.objects.create(paper=paper, author=author, position=1)
 
-    update_paper_combined_score(paper, save=False)
+    update_paper_combined_score(paper, author, save=False)
     assert paper.combined_score == pytest.approx(45.0)  # computed in-memory
 
     paper.refresh_from_db()

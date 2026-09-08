@@ -30,11 +30,12 @@ when *paper* fields were computed relative to each other, only that phase 1
 
 The `Paper` queryset driving phases 2/3 is built *after* phase 1's loop has
 finished, not reused from anything fetched earlier -- `update_paper_combined_score`
--> `compute_paper_author_reputation_score` reads `first_authorship.author.h_index_normalized`
-as already stored on the `Author` row; it does not recompute it. Building
-(and prefetching) the `Paper` queryset before phase 1 runs -- or reusing a
-queryset/prefetch cache populated before phase 1's author saves landed --
-would silently compute `combined_score` from stale `h_index_normalized`.
+-> `compute_paper_author_reputation_score` reads the resolved first author's
+`h_index_normalized` as already stored on the `Author` row; it does not
+recompute it. Building (and prefetching) the `Paper` queryset before phase 1
+runs -- or reusing a queryset/prefetch cache populated before phase 1's
+author saves landed -- would silently compute `combined_score` from stale
+`h_index_normalized`.
 """
 
 from __future__ import annotations
@@ -69,13 +70,17 @@ class Command(BaseCommand):
         # phase 1 has fully completed, so `update_paper_combined_score`
         # reads each paper's first author's freshly-saved
         # `h_index_normalized`, not a stale value. `prefetch_related`
-        # avoids one query per paper from
-        # `compute_paper_author_reputation_score`'s
-        # `paper.authorships.order_by("position").first()`.
+        # plus a bare `.all()` on the prefetched `authorships` manager
+        # (never `.order_by()`/`.filter()`, which bypass the prefetch
+        # cache) resolves the first author with no extra query --
+        # `PaperAuthorship.Meta.ordering = ["position"]` already sorts
+        # the prefetched rows, so element [0] is the position-1 author.
         papers_recomputed = 0
         for paper in Paper.objects.prefetch_related("authorships__author"):
+            authorships = list(paper.authorships.all())
+            first_author = authorships[0].author if authorships else None
             update_paper_citation_velocity(paper, save=False)
-            update_paper_combined_score(paper, save=False)
+            update_paper_combined_score(paper, first_author, save=False)
             paper.save(
                 update_fields=[
                     "citation_velocity",

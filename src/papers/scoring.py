@@ -257,34 +257,44 @@ def normalize_velocity_score(citation_velocity: float) -> float:
     return min(citation_velocity / CITATION_VELOCITY_REFERENCE_MAX, 1.0) * 100
 
 
-def compute_paper_author_reputation_score(paper: Paper) -> float:
-    """Normalized reputation score derived from `paper`'s first author only.
+def compute_paper_author_reputation_score(first_author: Author | None) -> float:
+    """Normalized reputation score from an already-resolved first author.
 
-    Reads `paper.authorships.order_by("position").first()` (position == 1
-    for a properly-ordered paper; `PaperAuthorship.Meta.ordering` already
-    defaults to `["position"]`, the explicit `order_by` here just makes
-    that intent visible) and normalizes that author's `h_index_normalized`.
-    A paper with zero `PaperAuthorship` rows returns `0.0` -- a defined
-    fallback, not an error, mirroring #11/#12's convention.
+    Takes the `Author` for the paper's position-1 `PaperAuthorship`
+    directly (or `None` for a paper with zero authorships), rather than
+    looking it up itself. The caller is responsible for resolving it --
+    typically from a `.prefetch_related("authorships__author")`
+    queryset, reading a bare `.all()` on the authorships manager (which
+    reuses the prefetch cache and is already position-ordered per
+    `PaperAuthorship.Meta.ordering`) rather than `.order_by(...)` or
+    `.filter(...)`, which always bypass that cache and issue a fresh
+    query. This keeps the function itself a plain, query-free
+    computation, and moves the one query-shaped decision (how to find
+    "first author" cheaply) to whichever caller already has the right
+    data loaded (#14).
     """
-    first_authorship = paper.authorships.order_by("position").first()
-    if first_authorship is None:
+    if first_author is None:
         return 0.0
-    return normalize_h_index_score(first_authorship.author.h_index_normalized)
+    return normalize_h_index_score(first_author.h_index_normalized)
 
 
-def update_paper_combined_score(paper: Paper, save: bool = True) -> Paper:
+def update_paper_combined_score(
+    paper: Paper, first_author: Author | None, save: bool = True
+) -> Paper:
     """Recompute and store `author_reputation_score`/`velocity_score`/
     `combined_score` on `paper`.
 
-    Reads `paper.citation_velocity` and the first author's
-    `h_index_normalized` as already stored -- it does not itself
-    recompute those sub-signals (that stays #11/#12's job; sequencing
-    multiple papers/authors is #14's job). Convenience wrapper following
-    the same shape as `update_author_h_index` / `update_paper_citation_velocity`.
-    Set `save=False` to compute without writing to the database.
+    `first_author` is the `Author` for `paper`'s position-1 authorship
+    (or `None`), resolved by the caller exactly as for
+    `compute_paper_author_reputation_score` above. Still reads
+    `paper.citation_velocity` and `first_author.h_index_normalized` as
+    already stored -- it does not itself recompute those sub-signals
+    (that stays #11/#12's job; sequencing multiple papers/authors is
+    #14's job). Convenience wrapper following the same shape as
+    `update_author_h_index` / `update_paper_citation_velocity`. Set
+    `save=False` to compute without writing to the database.
     """
-    author_reputation_score = compute_paper_author_reputation_score(paper)
+    author_reputation_score = compute_paper_author_reputation_score(first_author)
     velocity_score = normalize_velocity_score(paper.citation_velocity)
     combined_score = (
         DEFAULT_REPUTATION_WEIGHT * author_reputation_score

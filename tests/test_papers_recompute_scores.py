@@ -178,23 +178,27 @@ def test_repeated_runs_produce_identical_stored_values():
 # `update_paper_combined_score` functions unmodified, as #14 requires:
 # each Author/Paper still needs its own `.save()` (one query per row,
 # inherent to those functions -- see #14's own text: "the command's only
-# job is correct iteration/sequencing, not upsert logic"). Separately,
-# `compute_paper_author_reputation_score` (#13, out of scope for #14)
-# calls `paper.authorships.order_by("position").first()`, and Django's
-# prefetch cache is only reused by a bare `.all()` -- any `.order_by()`/
-# `.filter()`/etc. on a prefetched related manager always issues a fresh
-# query, so this is one *unavoidable* (from this command's side) extra
-# read per paper, confirmed empirically (see the issue #14 comment this
-# PR links).
+# job is correct iteration/sequencing, not upsert logic").
+#
+# Per the #14 amendment, `compute_paper_author_reputation_score` /
+# `update_paper_combined_score` now take an already-resolved `first_author`
+# instead of looking it up themselves, and the command resolves it with a
+# bare `.all()` on the prefetched `authorships` manager (reusing the
+# `prefetch_related("authorships__author")` cache, since
+# `PaperAuthorship.Meta.ordering = ["position"]` already sorts it) rather
+# than the old `.order_by("position").first()`, which always bypassed the
+# prefetch cache and issued a fresh query per paper. That removes the two
+# previously-unavoidable extra reads per paper.
 #
 # What "no N+1" actually verifiably means here, and what these two tests
-# prove: the query count is `5 + num_authors + 3*num_papers` -- a base
-# constant plus a *fixed* per-author cost (1) and a *fixed* per-paper cost
-# (3: two prefetch-bypass reads + one merged `.save()`) that does **not**
-# depend on dataset size, and critically does not depend on how many
-# authors a paper has or how many papers an author has (that would be the
-# actual N+1 bug this test guards against). Both fixture sizes are
-# asserted against the *same* formula.
+# prove: the query count is `BASE + num_authors + num_papers` -- a base
+# constant (the two driving querysets plus their prefetches) plus a
+# *fixed* per-author cost (1 `.save()`) and a *fixed* per-paper cost (1
+# `.save()`, no per-paper multiplier beyond it) that does **not** depend
+# on dataset size, and critically does not depend on how many authors a
+# paper has or how many papers an author has (that would be the actual
+# N+1 bug this test guards against). Both fixture sizes are asserted
+# against the *same* formula.
 
 
 def _build_fixture(*, num_authors: int, num_papers: int) -> None:
@@ -207,8 +211,11 @@ def _build_fixture(*, num_authors: int, num_papers: int) -> None:
             PaperAuthorship.objects.create(paper=paper, author=authors[i % num_authors], position=1)
 
 
+BASE_QUERY_COUNT = 5  # phase-1 Author query + its prefetch, phase-2/3 Paper query + its prefetch
+
+
 def _expected_query_count(*, num_authors: int, num_papers: int) -> int:
-    return 5 + num_authors + 3 * num_papers
+    return BASE_QUERY_COUNT + num_authors + num_papers
 
 
 @pytest.mark.django_db
