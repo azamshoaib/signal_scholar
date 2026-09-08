@@ -1,0 +1,21 @@
+{% extends "papers/base.html" %}
+
+{% block title %}SignalScholar{% endblock %}
+
+{% block content %}
+  <h1>SignalScholar</h1>
+  <p>A research discovery tool that ranks papers by author reputation and
+  impact signals, not just raw citation counts.</p>
+
+  <nav>
+    <ul>
+      <li><a href="{% url 'papers:search' %}">Search papers</a></li>
+      {% if user.is_authenticated %}
+        <li><a href="{% url 'papers:feed' %}">Your feed</a></li>
+        <li><a href="{% url 'logout' %}">Log out</a></li>
+      {% else %}
+        <li><a href="{% url 'login' %}">Log in</a></li>
+      {% endif %}
+    </ul>
+  </nav>
+{% endblock %}
