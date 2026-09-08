@@ -17,3 +17,5 @@ Documents
 - `_docs/process.md` - how work is organized
 - `_docs/scheduling.md` - how recurring jobs (recompute_scores,
   poll_followed_authors) are scheduled
+- `_docs/deployment.md` - where deployment-readiness settings live and
+  how to verify them without a live host

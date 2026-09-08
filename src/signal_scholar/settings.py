@@ -12,13 +12,33 @@ from pathlib import Path
 # src/signal_scholar/settings.py -> repo root is three parents up.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-# SECURITY WARNING: keep this only for local/dev use until a real secret
-# management story lands.
-SECRET_KEY = "django-insecure-dev-only-change-me"
 
-DEBUG = True
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ("true", "1", "yes", "on")
 
-ALLOWED_HOSTS: list[str] = []
+
+# SECURITY WARNING: the "django-insecure-..." fallback below is a
+# LOCAL-DEV-ONLY value. It must never be used where DEBUG=False -- any
+# real deployment must set DJANGO_SECRET_KEY to a long, random value.
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-dev-only-change-me")
+
+# Defaults to True (unchanged from before) so local dev stays zero-config
+# without a .env file. Any real deployment must explicitly set
+# DJANGO_DEBUG=False -- `manage.py check --deploy` is the safety net that
+# catches a forgotten override (security.W018).
+DEBUG = _env_bool("DJANGO_DEBUG", True)
+
+# Comma-separated list of allowed hosts, e.g. "example.com,www.example.com".
+# Defaults to [] when unset (unchanged from today -- Django already permits
+# localhost/127.0.0.1 automatically while DEBUG=True). A real deployment
+# must set DJANGO_ALLOWED_HOSTS to its actual domain(s).
+_allowed_hosts_env = os.environ.get("DJANGO_ALLOWED_HOSTS", "")
+ALLOWED_HOSTS: list[str] = [
+    host.strip() for host in _allowed_hosts_env.split(",") if host.strip()
+]
 
 INSTALLED_APPS: list[str] = [
     "django.contrib.admin",
@@ -33,11 +53,13 @@ INSTALLED_APPS: list[str] = [
 
 MIDDLEWARE: list[str] = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
 ROOT_URLCONF = "signal_scholar.urls"
@@ -70,6 +92,24 @@ DATABASES = {
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
+# Without this, {% static %} raises a hard 500 for any file not yet in the
+# manifest (e.g. `collectstatic` hasn't been run -- the common case for
+# local dev/test, which use Django's dev static file serving instead).
+# Falls back to the unhashed filename in that case; once a real deployment
+# runs `collectstatic`, every referenced file has a manifest entry and this
+# has no effect.
+WHITENOISE_MANIFEST_STRICT = False
 
 # Per GitHub issue #42: a public-facing login flow (mounted in
 # signal_scholar/urls.py at /login/ and /logout/) so an unauthenticated

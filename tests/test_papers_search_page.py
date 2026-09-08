@@ -9,6 +9,7 @@ page-view endpoint end to end, with hand-constructed `Paper`/`Author`/
 from __future__ import annotations
 
 import pytest
+from django.templatetags.static import static
 
 from papers.models import Author, Paper, PaperAuthorship, Venue
 
@@ -353,4 +354,8 @@ def test_full_page_request_includes_weight_slider_script_tag(client):
     body = response.content.decode()
 
     assert response.status_code == 200
-    assert "weight_slider.js" in body
+    # Resolved via Django's `static()` helper (not a hardcoded literal)
+    # because production uses whitenoise's CompressedManifestStaticFilesStorage
+    # (issue #29), which serves a content-hashed filename, e.g.
+    # weight_slider.<hash>.js.
+    assert static("papers/weight_slider.js") in body
