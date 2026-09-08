@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from openalex_client import OpenAlexClientError, OpenAlexWork
+from openalex_client import OpenAlexAuthor, OpenAlexClientError, OpenAlexWork
 from papers.models import Paper
 from papers.services import search_papers, search_papers_with_live_fallback
 
@@ -54,7 +54,7 @@ def test_zero_local_results_triggers_live_fetch_and_ingests(
     results, count = search_papers_with_live_fallback("autonomous driving")
 
     _no_live_openalex_search_by_default.assert_called_once_with(
-        "autonomous driving", max_results=8
+        "autonomous driving", max_results=5
     )
     assert count == 2
     assert Paper.objects.count() == 2
@@ -182,3 +182,37 @@ def test_scoring_failure_degrades_to_empty_result_not_raise(
 
     assert results == []
     assert count == 0
+
+
+@pytest.mark.django_db
+def test_highly_collaborative_work_authors_truncated_before_ingest(
+    _no_live_openalex_search_by_default,
+):
+    """Diagnosed against production (2026-09-09): a materials-science
+    query returned works with dozens of co-authors, and ingesting all of
+    them was the actual cause of a ~30s-plus request that a platform
+    timeout then killed. Only the first author is ever read for scoring
+    (issue #13), so truncating costs nothing functionally here."""
+    many_authors = [
+        OpenAlexAuthor(openalex_id=f"A{i}", name=f"Author {i}") for i in range(20)
+    ]
+    _no_live_openalex_search_by_default.return_value = [
+        OpenAlexWork(
+            openalex_id="W1",
+            title="Highly collaborative paper",
+            publication_year=2023,
+            doi=None,
+            abstract=None,
+            venue=None,
+            authors=many_authors,
+            cited_by_count=1,
+            counts_by_year=[],
+        )
+    ]
+
+    from papers.models import Paper
+
+    search_papers_with_live_fallback("some collaborative topic")
+
+    paper = Paper.objects.get(openalex_id="W1")
+    assert paper.authorships.count() <= 5

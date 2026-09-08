@@ -29,15 +29,18 @@ from papers.scoring import (
 
 logger = logging.getLogger(__name__)
 
-# Capped modestly since this runs synchronously inside a search request --
-# see `search_papers_with_live_fallback`'s docstring.
-# Kept small: each work ingested costs several sequential DB round trips
-# (papers/services.ingestion does a get_or_create per paper/author/
-# institution/venue), and over a real network to a managed Postgres this
-# adds up fast inside one synchronous request -- a 502 in production
-# during testing traced back to this combined with the default gunicorn
-# worker timeout. 8 keeps a cold fallback comfortably fast.
-LIVE_FALLBACK_MAX_RESULTS = 8
+# Both capped after diagnosing a production 500/502 against the real
+# deployment (2026-09-09): each work ingested costs several sequential DB
+# round trips (one `get_or_create` per paper/author/institution/venue),
+# and over a real network to a managed Postgres those add up fast inside
+# one synchronous request -- measured ~0.25-0.3s per round trip. A
+# handful of works from a highly-collaborative field (47 authors across 5
+# materials-science papers, observed live) was enough to approach a
+# platform-enforced request timeout on its own; capping `max_results`
+# alone doesn't bound that, since it's author *count* that dominates, not
+# work count. See `search_papers_with_live_fallback`'s docstring.
+LIVE_FALLBACK_MAX_RESULTS = 5
+MAX_AUTHORS_PER_WORK_FOR_LIVE_FALLBACK = 5
 
 DEFAULT_LIMIT = 25
 MAX_LIMIT = 100
@@ -254,6 +257,23 @@ def search_papers_with_live_fallback(
     on_fallback(len(works))
     if not works:
         return results, count
+
+    # Diagnosed against production (2026-09-09): ingestion cost scales
+    # with total *rows* written (authors/institutions/venues), not just
+    # `len(works)` -- a materials-science query returned 5 works with 47
+    # authors between them and took ~30s end to end over a real network
+    # to a managed Postgres, right at the edge of a platform request
+    # timeout. Highly-collaborative papers can have dozens of authors;
+    # `LIVE_FALLBACK_MAX_RESULTS` alone doesn't bound that. Only the
+    # first author is ever read for scoring (`compute_paper_author_
+    # reputation_score` uses position 1 -- issue #13), so truncating
+    # here costs nothing functionally for THIS path -- a full topic
+    # ingestion via `ingest_openalex` (which the detail page's full
+    # author list depends on) is untouched, since this only mutates the
+    # in-memory `OpenAlexWork` list built for this one fallback call.
+    for work in works:
+        if len(work.authors) > MAX_AUTHORS_PER_WORK_FOR_LIVE_FALLBACK:
+            work.authors = work.authors[:MAX_AUTHORS_PER_WORK_FOR_LIVE_FALLBACK]
 
     # Ingestion and scoring are a best-effort enhancement on top of an
     # already-valid (empty) search result -- any failure here (a DB
