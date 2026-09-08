@@ -8,6 +8,16 @@
   <form hx-get="{% url 'papers:search' %}" hx-target="#results" hx-push-url="true">
     <label for="q">Topic</label>
     <input type="text" id="q" name="q" value="{{ q }}">
+
+    <label for="year_min">Year (min)</label>
+    <input type="number" id="year_min" name="year_min" value="{{ year_min }}">
+
+    <label for="year_max">Year (max)</label>
+    <input type="number" id="year_max" name="year_max" value="{{ year_max }}">
+
+    <label for="velocity_min">Min. citation velocity</label>
+    <input type="number" id="velocity_min" name="velocity_min" min="0" step="any" value="{{ velocity_min }}">
+
     <button type="submit">Search</button>
   </form>
 

@@ -258,3 +258,148 @@ def test_no_n_plus_one_query_growth_larger_fixture_same_query_count(
 
     with django_assert_num_queries(EXPECTED_SEARCH_QUERY_COUNT):
         client.get("/api/search", {"q": "matching"})
+
+
+# --- GitHub issue #18: year_min / year_max / velocity_min filters ---
+
+
+@pytest.mark.django_db
+def test_year_min_alone_excludes_older_paper_keeps_newer(client):
+    older = Paper.objects.create(title="Robotics old paper", publication_year=2010)
+    newer = Paper.objects.create(title="Robotics new paper", publication_year=2020)
+
+    response = client.get("/api/search", {"q": "robotics", "year_min": 2015})
+
+    assert response.status_code == 200
+    ids = {r["id"] for r in response.json()["results"]}
+    assert ids == {newer.id}
+    assert older.id not in ids
+
+
+@pytest.mark.django_db
+def test_year_max_alone_excludes_newer_paper_keeps_older(client):
+    older = Paper.objects.create(title="Robotics old paper", publication_year=2010)
+    newer = Paper.objects.create(title="Robotics new paper", publication_year=2020)
+
+    response = client.get("/api/search", {"q": "robotics", "year_max": 2015})
+
+    assert response.status_code == 200
+    ids = {r["id"] for r in response.json()["results"]}
+    assert ids == {older.id}
+    assert newer.id not in ids
+
+
+@pytest.mark.django_db
+def test_year_min_and_year_max_combined_and_semantics(client):
+    too_old = Paper.objects.create(title="Robotics ancient paper", publication_year=2000)
+    in_range = Paper.objects.create(title="Robotics mid paper", publication_year=2015)
+    too_new = Paper.objects.create(title="Robotics future paper", publication_year=2030)
+
+    response = client.get(
+        "/api/search", {"q": "robotics", "year_min": 2010, "year_max": 2020}
+    )
+
+    assert response.status_code == 200
+    ids = {r["id"] for r in response.json()["results"]}
+    assert ids == {in_range.id}
+    assert too_old.id not in ids
+    assert too_new.id not in ids
+
+
+@pytest.mark.django_db
+def test_velocity_min_alone_excludes_low_velocity_paper(client):
+    low = Paper.objects.create(title="Robotics low velocity", citation_velocity=1.0)
+    high = Paper.objects.create(title="Robotics high velocity", citation_velocity=10.0)
+
+    response = client.get("/api/search", {"q": "robotics", "velocity_min": 5.0})
+
+    assert response.status_code == 200
+    ids = {r["id"] for r in response.json()["results"]}
+    assert ids == {high.id}
+    assert low.id not in ids
+
+
+@pytest.mark.django_db
+def test_filters_apply_on_top_of_keyword_match(client):
+    # Matches q and passes filters.
+    match_and_pass = Paper.objects.create(
+        title="Robotics breakthrough",
+        publication_year=2020,
+        citation_velocity=10.0,
+    )
+    # Matches q but fails the year filter.
+    match_but_fail_year = Paper.objects.create(
+        title="Robotics old breakthrough",
+        publication_year=2000,
+        citation_velocity=10.0,
+    )
+    # Doesn't match q at all, but would pass the filters.
+    Paper.objects.create(
+        title="Something else entirely",
+        publication_year=2020,
+        citation_velocity=10.0,
+    )
+
+    response = client.get(
+        "/api/search",
+        {"q": "robotics", "year_min": 2010, "velocity_min": 5.0},
+    )
+
+    assert response.status_code == 200
+    ids = {r["id"] for r in response.json()["results"]}
+    assert ids == {match_and_pass.id}
+    assert match_but_fail_year.id not in ids
+
+
+@pytest.mark.django_db
+def test_null_publication_year_excluded_when_year_filter_active(client):
+    Paper.objects.create(title="Robotics unknown year paper", publication_year=None)
+    dated = Paper.objects.create(title="Robotics dated paper", publication_year=2020)
+
+    response = client.get("/api/search", {"q": "robotics", "year_min": 2000})
+
+    assert response.status_code == 200
+    ids = {r["id"] for r in response.json()["results"]}
+    assert ids == {dated.id}
+
+
+@pytest.mark.django_db
+def test_year_min_greater_than_year_max_returns_400(client):
+    Paper.objects.create(title="Robotics paper", publication_year=2020)
+
+    response = client.get(
+        "/api/search", {"q": "robotics", "year_min": 2020, "year_max": 2010}
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_negative_velocity_min_returns_422(client):
+    response = client.get("/api/search", {"q": "robotics", "velocity_min": -1})
+
+    assert response.status_code == 422
+
+
+@pytest.mark.django_db
+def test_blank_q_with_filters_present_still_returns_400(client):
+    response = client.get(
+        "/api/search",
+        {"q": "   ", "year_min": 2010, "year_max": 2020, "velocity_min": 1.0},
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_omitting_all_filters_reproduces_prior_behavior(client):
+    paper = Paper.objects.create(
+        title="Robotics paper", publication_year=2020, citation_velocity=1.0
+    )
+
+    response = client.get("/api/search", {"q": "robotics"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["count"] == 1
+    assert data["results"][0]["id"] == paper.id

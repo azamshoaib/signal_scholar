@@ -10,6 +10,16 @@ both branch on the same query-param parsing and call the same
 `papers.services.search_papers` function, so that logic isn't duplicated
 across two view functions.
 
+Per GitHub issue #18, `search` also parses `year_min`/`year_max`/
+`velocity_min` from `request.GET` (a small int/float-parsing helper
+below treats an unparseable value as "not provided" rather than an
+error, since these only reach the server via a hand-edited URL -- the
+number inputs already constrain normal browser use) and passes them
+through to `papers.services.search_papers`. A syntactically valid but
+semantically invalid combination (e.g. `year_min > year_max`) raises
+`ValueError` from that call, which is rendered as inline error text in
+`papers/_results.html` instead of a result list.
+
 Per GitHub issue #17, `detail` renders a single paper's detail page,
 including a transparency breakdown of the `papers.scoring` sub-signals
 that produced its `combined_score`. Unlike `search`, it builds its
@@ -29,21 +39,54 @@ from papers.scoring import DEFAULT_REPUTATION_WEIGHT, DEFAULT_VELOCITY_WEIGHT
 from papers.services import search_papers
 
 
+def _parse_optional_number(raw: str | None, cast):
+    """Parse a raw `request.GET` string with `cast` (`int` or `float`).
+
+    Returns `None` for a missing/blank value *or* one `cast` can't parse
+    -- per #18, a malformed value in a hand-edited URL degrades to "not
+    provided" rather than surfacing a raw validation error on the page.
+    """
+    if raw is None or raw.strip() == "":
+        return None
+    try:
+        return cast(raw)
+    except ValueError:
+        return None
+
+
 def search(request):
     q = request.GET.get("q", "")
     q_stripped = q.strip()
 
+    year_min = _parse_optional_number(request.GET.get("year_min"), int)
+    year_max = _parse_optional_number(request.GET.get("year_max"), int)
+    velocity_min = _parse_optional_number(request.GET.get("velocity_min"), float)
+
     results = None
     count = 0
+    error = None
     searched = bool(q_stripped)
     if searched:
-        results, count = search_papers(q_stripped, limit=25)
+        try:
+            results, count = search_papers(
+                q_stripped,
+                limit=25,
+                year_min=year_min,
+                year_max=year_max,
+                velocity_min=velocity_min,
+            )
+        except ValueError as exc:
+            error = str(exc)
 
     context = {
         "q": q,
+        "year_min": year_min,
+        "year_max": year_max,
+        "velocity_min": velocity_min,
         "results": results,
         "count": count,
         "searched": searched,
+        "error": error,
     }
 
     if request.headers.get("HX-Request") == "true":

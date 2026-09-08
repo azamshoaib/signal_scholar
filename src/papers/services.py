@@ -17,7 +17,13 @@ DEFAULT_LIMIT = 25
 MAX_LIMIT = 100
 
 
-def search_papers(q: str, limit: int = DEFAULT_LIMIT) -> tuple[list[dict], int]:
+def search_papers(
+    q: str,
+    limit: int = DEFAULT_LIMIT,
+    year_min: int | None = None,
+    year_max: int | None = None,
+    velocity_min: float | None = None,
+) -> tuple[list[dict], int]:
     """Search locally-ingested papers by keyword.
 
     This is substring matching (case-insensitive `icontains` against
@@ -32,15 +38,30 @@ def search_papers(q: str, limit: int = DEFAULT_LIMIT) -> tuple[list[dict], int]:
     and is silently capped at `MAX_LIMIT` (100); the returned `count`
     reflects the total match count *before* `limit` truncation.
 
-    Raises `ValueError` if `q.strip()` is empty -- the one piece of
-    validation shared by both callers. This is deliberately a plain
-    `ValueError`, not Ninja's `HttpError`, since this function has no
-    knowledge of HTTP -- translating it into a 400 response is the
-    caller's job.
+    Per GitHub issue #18, `year_min`/`year_max`/`velocity_min` are
+    optional, additive `AND` filters applied on top of the keyword match,
+    narrowing (not replacing) the #15/#16 search. All three default to
+    `None`, meaning "no filter" -- a call with none of them supplied
+    behaves exactly as before #18. "Field" filtering is out of scope for
+    #18 (`Paper` has no classification column yet -- see #37).
+
+    Raises `ValueError` for:
+      - `q.strip()` empty -- the one piece of validation #15/#16 already
+        had, unchanged. `q` stays required; #18 deliberately does not add
+        a query-less "browse by filters alone" mode (see #18).
+      - `year_min > year_max` (both given).
+      - `velocity_min < 0`.
+    This is deliberately a plain `ValueError`, not Ninja's `HttpError`,
+    since this function has no knowledge of HTTP -- translating it into a
+    400 response (or an inline page error) is the caller's job.
     """
     q = q.strip()
     if not q:
         raise ValueError("q must not be blank")
+    if year_min is not None and year_max is not None and year_min > year_max:
+        raise ValueError("year_min must not be greater than year_max")
+    if velocity_min is not None and velocity_min < 0:
+        raise ValueError("velocity_min must not be negative")
 
     capped_limit = min(limit, MAX_LIMIT)
 
@@ -48,8 +69,19 @@ def search_papers(q: str, limit: int = DEFAULT_LIMIT) -> tuple[list[dict], int]:
         Paper.objects.select_related("venue")
         .prefetch_related("authorships__author")
         .filter(Q(title__icontains=q) | Q(abstract__icontains=q))
-        .order_by("-combined_score", "id")
     )
+    if year_min is not None:
+        # `publication_year__gte` on a NULL `publication_year` is never
+        # true under normal SQL NULL-comparison semantics, so a paper
+        # with an unknown year is excluded whenever a year filter is
+        # active -- intentional, not an oversight.
+        queryset = queryset.filter(publication_year__gte=year_min)
+    if year_max is not None:
+        queryset = queryset.filter(publication_year__lte=year_max)
+    if velocity_min is not None:
+        queryset = queryset.filter(citation_velocity__gte=velocity_min)
+
+    queryset = queryset.order_by("-combined_score", "id")
     count = queryset.count()
 
     results = []

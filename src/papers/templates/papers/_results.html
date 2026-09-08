@@ -1,4 +1,6 @@
-{% if not searched %}
+{% if error %}
+  <p>{{ error }}</p>
+{% elif not searched %}
   <p>Enter a topic to search.</p>
 {% elif count == 0 %}
   <p>No papers found for "{{ q }}". Try a different search term.</p>

@@ -25,7 +25,14 @@ router = Router()
 
 
 @router.get("/search", response=PaperSearchResponseSchema)
-def search(request, q: str = Query(...), limit: int = Query(DEFAULT_LIMIT, ge=1)):
+def search(
+    request,
+    q: str = Query(...),
+    limit: int = Query(DEFAULT_LIMIT, ge=1),
+    year_min: int | None = Query(None),
+    year_max: int | None = Query(None),
+    velocity_min: float | None = Query(None, ge=0),
+):
     """Search locally-ingested papers by keyword.
 
     This is substring matching (case-insensitive `icontains` against
@@ -39,11 +46,21 @@ def search(request, q: str = Query(...), limit: int = Query(DEFAULT_LIMIT, ge=1)
     makes the order deterministic for equal `combined_score` rows).
     `limit` defaults to 25 and is silently capped at 100; `count` in the
     response reflects the total match count *before* `limit` truncation.
+
+    Per GitHub issue #18, `year_min`/`year_max`/`velocity_min` are
+    optional `AND`-combined filters narrowing the keyword search --
+    `year_min`/`year_max` reject non-integers with Ninja's standard `422`
+    for free, and `velocity_min`'s `ge=0` rejects a negative value with
+    `422` before `search_papers` is ever called (so `search_papers`'s own
+    `velocity_min < 0` check is unreachable from here -- it's exercised
+    only by `papers.views.search`'s page path instead). A semantically
+    invalid but well-typed combination (`year_min > year_max`) is caught
+    below and turned into a `400`.
     """
     q = q.strip()
     try:
-        results, count = search_papers(q, limit)
-    except ValueError:
-        raise HttpError(400, "q must not be blank") from None
+        results, count = search_papers(q, limit, year_min, year_max, velocity_min)
+    except ValueError as exc:
+        raise HttpError(400, str(exc)) from None
 
     return {"results": results, "count": count}
