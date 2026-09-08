@@ -9,7 +9,15 @@ constraints — since a bare M2M would not need this coverage.
 import pytest
 from django.db import IntegrityError, transaction
 
-from papers.models import Author, Citation, Institution, Paper, PaperAuthorship, Venue
+from papers.models import (
+    Author,
+    Citation,
+    Follow,
+    Institution,
+    Paper,
+    PaperAuthorship,
+    Venue,
+)
 
 
 @pytest.mark.django_db
@@ -192,3 +200,100 @@ def test_venue_and_citation_str_representations():
 
     assert str(venue) == "NeurIPS"
     assert str(citation) == "Citing Paper -> Cited Paper"
+
+
+# --- Follow (issue #25) ------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_follow_author_and_institution(django_user_model):
+    user = django_user_model.objects.create_user(username="alice", password="pw")
+    author = Author.objects.create(name="Ada Lovelace")
+    institution = Institution.objects.create(name="Aalto University")
+
+    author_follow = Follow.objects.create(user=user, author=author)
+    institution_follow = Follow.objects.create(user=user, institution=institution)
+
+    assert author_follow.author == author
+    assert author_follow.institution is None
+    assert institution_follow.institution == institution
+    assert institution_follow.author is None
+    assert set(user.follows.all()) == {author_follow, institution_follow}
+
+
+@pytest.mark.django_db
+def test_follow_check_constraint_rejects_neither_author_nor_institution(
+    django_user_model,
+):
+    user = django_user_model.objects.create_user(username="bob", password="pw")
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            Follow.objects.create(user=user)
+
+
+@pytest.mark.django_db
+def test_follow_check_constraint_rejects_both_author_and_institution(
+    django_user_model,
+):
+    user = django_user_model.objects.create_user(username="carol", password="pw")
+    author = Author.objects.create(name="Ada Lovelace")
+    institution = Institution.objects.create(name="Aalto University")
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            Follow.objects.create(user=user, author=author, institution=institution)
+
+
+@pytest.mark.django_db
+def test_follow_unique_together_prevents_duplicate_author_follow(django_user_model):
+    user = django_user_model.objects.create_user(username="dave", password="pw")
+    author = Author.objects.create(name="Ada Lovelace")
+    Follow.objects.create(user=user, author=author)
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            Follow.objects.create(user=user, author=author)
+
+
+@pytest.mark.django_db
+def test_follow_unique_together_prevents_duplicate_institution_follow(
+    django_user_model,
+):
+    user = django_user_model.objects.create_user(username="erin", password="pw")
+    institution = Institution.objects.create(name="Aalto University")
+    Follow.objects.create(user=user, institution=institution)
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            Follow.objects.create(user=user, institution=institution)
+
+
+@pytest.mark.django_db
+def test_follow_nullable_unique_allows_one_author_and_one_institution_follow_per_user(
+    django_user_model,
+):
+    # A row's NULL institution (author-follow) never collides with
+    # another row's NULL author (institution-follow) under Postgres's
+    # nullable-unique semantics -- both belong to the same user.
+    user = django_user_model.objects.create_user(username="frank", password="pw")
+    author = Author.objects.create(name="Ada Lovelace")
+    institution = Institution.objects.create(name="Aalto University")
+
+    Follow.objects.create(user=user, author=author)
+    Follow.objects.create(user=user, institution=institution)
+
+    assert Follow.objects.filter(user=user).count() == 2
+
+
+@pytest.mark.django_db
+def test_follow_str_representation(django_user_model):
+    user = django_user_model.objects.create_user(username="grace", password="pw")
+    author = Author.objects.create(name="Ada Lovelace")
+    institution = Institution.objects.create(name="Aalto University")
+
+    author_follow = Follow.objects.create(user=user, author=author)
+    institution_follow = Follow.objects.create(user=user, institution=institution)
+
+    assert "Ada Lovelace" in str(author_follow)
+    assert "Aalto University" in str(institution_follow)

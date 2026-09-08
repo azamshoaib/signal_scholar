@@ -12,6 +12,7 @@ unique constraint, so not-yet-matched rows are fine, and ``unique=True``
 already creates the index we'd otherwise add via ``db_index``.
 """
 
+from django.conf import settings
 from django.db import models
 from django.db.models import CheckConstraint, Q
 from pgvector.django import VectorField
@@ -191,3 +192,59 @@ class Citation(models.Model):
 
     def __str__(self) -> str:
         return f"{self.citing_paper.title} -> {self.cited_paper.title}"
+
+
+class Follow(models.Model):
+    """A signed-in user's subscription to track an `Author` or `Institution`.
+
+    Per GitHub issue #25, this is one model (not separate `AuthorFollow`/
+    `InstitutionFollow` models) with a `CheckConstraint` requiring exactly
+    one of `author`/`institution` -- mirroring `Citation`'s self-citation
+    `CheckConstraint` above (#6) -- so #26 (background polling) and #27
+    (feed UI) have one table to query instead of two.
+
+    `unique_together` on both `(user, author)` and `(user, institution)`
+    prevents a user from following the same target twice; an
+    author-follow row's `NULL` `institution` never collides with another
+    row's `NULL` `institution` under Postgres's nullable-unique semantics
+    (the same reasoning `Paper.doi` relies on, per #5's docstring).
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="follows",
+    )
+    author = models.ForeignKey(
+        Author,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="followers",
+    )
+    institution = models.ForeignKey(
+        Institution,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="followers",
+    )
+
+    class Meta:
+        unique_together = (
+            ("user", "author"),
+            ("user", "institution"),
+        )
+        constraints = [
+            CheckConstraint(
+                condition=(
+                    Q(author__isnull=False, institution__isnull=True)
+                    | Q(author__isnull=True, institution__isnull=False)
+                ),
+                name="follow_exactly_one_of_author_or_institution",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        target = self.author or self.institution
+        return f"{self.user} follows {target}"

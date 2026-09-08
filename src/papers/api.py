@@ -15,11 +15,13 @@ into Ninja's `HttpError` and shapes the JSON response.
 
 from __future__ import annotations
 
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from ninja import Query, Router
 from ninja.errors import HttpError
+from ninja.security import django_auth
 
-from papers.models import Paper
+from papers.models import Author, Follow, Institution, Paper
 from papers.schemas import PaperSearchResponseSchema, SimilarPapersResponseSchema
 from papers.services import (
     CANDIDATE_POOL_SIZE,
@@ -110,3 +112,58 @@ def similar(request, paper_id: int):
     )
 
     return {"source_paper_id": paper.id, "results": results}
+
+
+def _follow(request, **target) -> JsonResponse:
+    """Shared `POST .../follow` body for the author/institution endpoints.
+
+    `target` is `{"author": author}` or `{"institution": institution}` --
+    whichever FK on `Follow` this call is for. Idempotent: a duplicate
+    follow does not create a second row (`get_or_create`) and returns
+    `200` instead of `201` per issue #25. Returns a raw `JsonResponse`
+    (rather than relying on Ninja's `response=` schema) since the status
+    code varies per call and Ninja requires every possible status to be
+    pre-declared in a `response=` schema map.
+    """
+    _, created = Follow.objects.get_or_create(user=request.user, **target)
+    status = 201 if created else 200
+    return JsonResponse({"following": True, "created": created}, status=status)
+
+
+def _unfollow(request, **target) -> HttpResponse:
+    """Shared `DELETE .../follow` body for the author/institution endpoints.
+
+    Idempotent: deleting a never-followed (but existing) target still
+    returns `204` per issue #25 -- `404` is reserved for a nonexistent
+    author/institution, checked by the caller before this runs.
+    """
+    Follow.objects.filter(user=request.user, **target).delete()
+    return HttpResponse(status=204)
+
+
+@router.post("/authors/{author_id}/follow", auth=django_auth)
+def follow_author(request, author_id: int):
+    """Follow `author_id`. See issue #25 for the full endpoint contract."""
+    author = get_object_or_404(Author, pk=author_id)
+    return _follow(request, author=author)
+
+
+@router.delete("/authors/{author_id}/follow", auth=django_auth)
+def unfollow_author(request, author_id: int):
+    """Unfollow `author_id`. See issue #25 for the full endpoint contract."""
+    author = get_object_or_404(Author, pk=author_id)
+    return _unfollow(request, author=author)
+
+
+@router.post("/institutions/{institution_id}/follow", auth=django_auth)
+def follow_institution(request, institution_id: int):
+    """Follow `institution_id`. See issue #25 for the full endpoint contract."""
+    institution = get_object_or_404(Institution, pk=institution_id)
+    return _follow(request, institution=institution)
+
+
+@router.delete("/institutions/{institution_id}/follow", auth=django_auth)
+def unfollow_institution(request, institution_id: int):
+    """Unfollow `institution_id`. See issue #25 for the full endpoint contract."""
+    institution = get_object_or_404(Institution, pk=institution_id)
+    return _unfollow(request, institution=institution)
