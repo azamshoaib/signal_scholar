@@ -31,7 +31,13 @@ logger = logging.getLogger(__name__)
 
 # Capped modestly since this runs synchronously inside a search request --
 # see `search_papers_with_live_fallback`'s docstring.
-LIVE_FALLBACK_MAX_RESULTS = 15
+# Kept small: each work ingested costs several sequential DB round trips
+# (papers/services.ingestion does a get_or_create per paper/author/
+# institution/venue), and over a real network to a managed Postgres this
+# adds up fast inside one synchronous request -- a 502 in production
+# during testing traced back to this combined with the default gunicorn
+# worker timeout. 8 keeps a cold fallback comfortably fast.
+LIVE_FALLBACK_MAX_RESULTS = 8
 
 DEFAULT_LIMIT = 25
 MAX_LIMIT = 100

@@ -86,12 +86,24 @@ DATABASES = {
         "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "signal_scholar_dev_password"),
         "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
         "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-        # Unset by default (local docker-compose Postgres has no TLS).
-        # Managed providers like Supabase require an encrypted connection --
-        # set DB_SSLMODE=require for those.
-        "OPTIONS": (
-            {"sslmode": os.environ["DB_SSLMODE"]} if os.environ.get("DB_SSLMODE") else {}
-        ),
+        "OPTIONS": {
+            # Unset by default (local docker-compose Postgres has no
+            # TLS). Managed providers like Supabase require an encrypted
+            # connection -- set DB_SSLMODE=require for those.
+            **({"sslmode": os.environ["DB_SSLMODE"]} if os.environ.get("DB_SSLMODE") else {}),
+            # psycopg3 auto-prepares a statement after it's run a few
+            # times (a real perf win against a normal Postgres). Against
+            # a PgBouncer pooler running in "transaction" mode (Supabase's
+            # default, and what this app's Supabase setup uses) that
+            # breaks: a prepared statement is tied to one physical
+            # backend connection, but transaction pooling can route the
+            # next query to a *different* one, which doesn't have it --
+            # surfacing as an opaque "prepared statement does not exist"
+            # failure. Disabling auto-prepare (harmless everywhere,
+            # including local dev) is psycopg3's own documented fix for
+            # this exact PgBouncer-transaction-mode incompatibility.
+            "prepare_threshold": None,
+        },
     }
 }
 

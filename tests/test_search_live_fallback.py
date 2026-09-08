@@ -54,7 +54,7 @@ def test_zero_local_results_triggers_live_fetch_and_ingests(
     results, count = search_papers_with_live_fallback("autonomous driving")
 
     _no_live_openalex_search_by_default.assert_called_once_with(
-        "autonomous driving", max_results=15
+        "autonomous driving", max_results=8
     )
     assert count == 2
     assert Paper.objects.count() == 2
