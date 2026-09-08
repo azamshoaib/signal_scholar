@@ -17,4 +17,5 @@ app_name = "papers"
 
 urlpatterns = [
     path("search/", views.search, name="search"),
+    path("papers/<int:pk>/", views.detail, name="detail"),
 ]

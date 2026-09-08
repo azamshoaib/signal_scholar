@@ -7,7 +7,7 @@
   <ul>
     {% for paper in results %}
       <li>
-        <h3>{{ paper.title }}</h3>
+        <h3><a href="{% url 'papers:detail' paper.id %}">{{ paper.title }}</a></h3>
         <p>{{ paper.first_author_name }} &middot; {{ paper.venue_name }} &middot; {{ paper.publication_year }}</p>
         <p>Score: {{ paper.combined_score|floatformat:1 }}</p>
       </li>

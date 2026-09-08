@@ -1,0 +1,59 @@
+{% extends "papers/base.html" %}
+
+{% block title %}{{ paper.title }} — SignalScholar{% endblock %}
+
+{% block content %}
+  <h1>{{ paper.title }}</h1>
+
+  <h2>Authors</h2>
+  <ol>
+    {% for author in authors %}
+      <li>{{ author.name }}</li>
+    {% empty %}
+      <li>No authors on record</li>
+    {% endfor %}
+  </ol>
+
+  <dl>
+    <dt>Publication year</dt>
+    <dd>{% if paper.publication_year %}{{ paper.publication_year }}{% else %}Unknown{% endif %}</dd>
+
+    <dt>Venue</dt>
+    <dd>{% if paper.venue %}{{ paper.venue.name }}{% else %}Unknown{% endif %}</dd>
+
+    {% if paper.doi %}
+      <dt>DOI</dt>
+      <dd><a href="https://doi.org/{{ paper.doi }}">{{ paper.doi }}</a></dd>
+    {% endif %}
+  </dl>
+
+  <h2>Abstract</h2>
+  <p>{% if paper.abstract %}{{ paper.abstract }}{% else %}No abstract available.{% endif %}</p>
+
+  <h2>Score breakdown</h2>
+  <table>
+    <tr>
+      <th>Signal</th>
+      <th>Raw value</th>
+      <th>Normalized (0-100)</th>
+    </tr>
+    <tr>
+      <td>
+        Author reputation &mdash; first author: {{ first_author_name }}
+        {% if first_author_h_index_normalized is not None %}
+          (h-index normalized: {{ first_author_h_index_normalized }})
+        {% endif %}
+      </td>
+      <td>{% if first_author_h_index_normalized is not None %}{{ first_author_h_index_normalized }}{% endif %}</td>
+      <td>{{ author_reputation_score }}</td>
+    </tr>
+    <tr>
+      <td>Citation velocity (citations/year)</td>
+      <td>{{ citation_velocity }}</td>
+      <td>{{ velocity_score }}</td>
+    </tr>
+  </table>
+
+  <h3>Combined score: {{ combined_score }}</h3>
+  <p>{{ weight_sentence }}</p>
+{% endblock %}
