@@ -86,6 +86,12 @@ DATABASES = {
         "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "signal_scholar_dev_password"),
         "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
         "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+        # Unset by default (local docker-compose Postgres has no TLS).
+        # Managed providers like Supabase require an encrypted connection --
+        # set DB_SSLMODE=require for those.
+        "OPTIONS": (
+            {"sslmode": os.environ["DB_SSLMODE"]} if os.environ.get("DB_SSLMODE") else {}
+        ),
     }
 }
 

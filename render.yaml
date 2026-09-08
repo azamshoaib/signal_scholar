@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: signal-scholar
+    runtime: python
+    plan: free
+    buildCommand: "pip install uv && uv sync --frozen && uv run python manage.py collectstatic --noinput && uv run python manage.py migrate"
+    startCommand: "uv run gunicorn signal_scholar.wsgi --log-file -"
+    envVars:
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: ".onrender.com"
+      - key: DB_SSLMODE
+        value: "require"
+      - key: POSTGRES_DB
+        sync: false
+      - key: POSTGRES_USER
+        sync: false
+      - key: POSTGRES_PASSWORD
+        sync: false
+      - key: POSTGRES_HOST
+        sync: false
+      - key: POSTGRES_PORT
+        sync: false
