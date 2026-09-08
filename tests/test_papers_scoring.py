@@ -12,6 +12,7 @@ import pytest
 from papers.models import Author, Paper, PaperAuthorship
 from papers.scoring import (
     CITATION_VELOCITY_REFERENCE_MAX,
+    DEFAULT_INFLUENTIAL_CITATION_WEIGHT,
     DEFAULT_REPUTATION_WEIGHT,
     DEFAULT_VELOCITY_WEIGHT,
     H_INDEX_NORMALIZED_REFERENCE_MAX,
@@ -20,10 +21,12 @@ from papers.scoring import (
     compute_citation_velocity,
     compute_h_index,
     compute_h_index_normalized,
+    compute_influential_citation_ratio,
     compute_paper_author_reputation_score,
     compute_paper_citation_velocity,
     compute_years_since_publication,
     normalize_h_index_score,
+    normalize_influential_citation_score,
     normalize_velocity_score,
     update_author_h_index,
     update_paper_citation_velocity,
@@ -347,6 +350,23 @@ def test_normalize_velocity_score_linear_clamp_and_saturation():
     assert normalize_velocity_score(500.0) == 100.0
 
 
+def test_compute_influential_citation_ratio_divides_and_falls_back_to_zero():
+    assert compute_influential_citation_ratio(26, 100) == pytest.approx(0.26)
+    # Zero-division guard, also the "no Semantic Scholar record" fallback.
+    assert compute_influential_citation_ratio(0, 0) == 0.0
+    # Guard actually fires (not coincidentally zero on both sides).
+    assert compute_influential_citation_ratio(5, 0) == 0.0
+
+
+def test_normalize_influential_citation_score_linear_and_saturation():
+    assert normalize_influential_citation_score(0.0) == 0.0
+    assert normalize_influential_citation_score(0.5) == pytest.approx(50.0)
+    assert normalize_influential_citation_score(1.0) == pytest.approx(100.0)
+    # A malformed ratio above 1.0 (e.g. influential_citation_count >
+    # citation_count in a bad response) saturates at 100, not unbounded.
+    assert normalize_influential_citation_score(5.0) == 100.0
+
+
 # --- Required scenarios, against real DB fixtures ---------------------------
 
 
@@ -451,11 +471,19 @@ def test_zero_authorship_paper_reputation_score_zero_and_combined_drops_term():
 
 @pytest.mark.django_db
 def test_paper_with_outlier_velocity_and_reputation_both_saturate_at_100():
-    # citation_velocity far above CITATION_VELOCITY_REFERENCE_MAX (e.g. 500)
-    # and h_index_normalized far above H_INDEX_NORMALIZED_REFERENCE_MAX
-    # (e.g. 20) both saturate at 100, not unbounded.
+    # citation_velocity far above CITATION_VELOCITY_REFERENCE_MAX (e.g. 500),
+    # h_index_normalized far above H_INDEX_NORMALIZED_REFERENCE_MAX (e.g.
+    # 20), and influential_citation_ratio at its natural max (1.0) all
+    # saturate at 100, not unbounded -- so combined_score also saturates at
+    # 100.0, not the two-term-only (DEFAULT_REPUTATION_WEIGHT +
+    # DEFAULT_VELOCITY_WEIGHT) * 100 = 67.0 that a default 0.0
+    # influential_citation_ratio would otherwise produce.
     outlier_author = _make_author(name="Outlier Author", h_index_normalized=20.0)
-    paper = Paper.objects.create(title="Outlier paper", citation_velocity=500.0)
+    paper = Paper.objects.create(
+        title="Outlier paper",
+        citation_velocity=500.0,
+        influential_citation_ratio=1.0,
+    )
     PaperAuthorship.objects.create(paper=paper, author=outlier_author, position=1)
 
     update_paper_combined_score(paper, outlier_author)
@@ -463,6 +491,7 @@ def test_paper_with_outlier_velocity_and_reputation_both_saturate_at_100():
 
     assert paper.author_reputation_score == 100.0
     assert paper.velocity_score == 100.0
+    assert paper.influential_citation_score == 100.0
     assert paper.combined_score == pytest.approx(100.0)
 
 
@@ -472,7 +501,9 @@ def test_combined_score_hand_computed_example():
     #   -> normalize_h_index_score(2.5) = min(2.5/5.0, 1.0)*100 = 50.0
     # paper citation_velocity = 20.0
     #   -> normalize_velocity_score(20.0) = min(20.0/50.0, 1.0)*100 = 40.0
-    # combined_score = 0.5*50.0 + 0.5*40.0 = 45.0
+    # paper influential_citation_ratio = 0.0 (default, not set here)
+    #   -> normalize_influential_citation_score(0.0) = 0.0
+    # combined_score = 0.34*50.0 + 0.33*40.0 + 0.33*0.0 = 30.2
     author = _make_author(name="Hand-Computed Author", h_index_normalized=2.5)
     paper = Paper.objects.create(title="Hand-computed paper", citation_velocity=20.0)
     PaperAuthorship.objects.create(paper=paper, author=author, position=1)
@@ -482,10 +513,71 @@ def test_combined_score_hand_computed_example():
 
     assert paper.author_reputation_score == pytest.approx(50.0)
     assert paper.velocity_score == pytest.approx(40.0)
-    assert paper.combined_score == pytest.approx(45.0)
+    assert paper.influential_citation_score == pytest.approx(0.0)
+    assert paper.combined_score == pytest.approx(30.2)
     assert paper.combined_score == pytest.approx(
-        DEFAULT_REPUTATION_WEIGHT * 50.0 + DEFAULT_VELOCITY_WEIGHT * 40.0
+        DEFAULT_REPUTATION_WEIGHT * 50.0
+        + DEFAULT_VELOCITY_WEIGHT * 40.0
+        + DEFAULT_INFLUENTIAL_CITATION_WEIGHT * 0.0
     )
+
+
+@pytest.mark.django_db
+def test_combined_score_hand_computed_example_all_three_terms():
+    # first author h_index_normalized = 2.5
+    #   -> normalize_h_index_score(2.5) = min(2.5/5.0, 1.0)*100 = 50.0
+    # paper citation_velocity = 20.0
+    #   -> normalize_velocity_score(20.0) = min(20.0/50.0, 1.0)*100 = 40.0
+    # paper influential_citation_ratio = 0.6
+    #   -> normalize_influential_citation_score(0.6) = min(0.6, 1.0)*100 = 60.0
+    # combined_score = 0.34*50.0 + 0.33*40.0 + 0.33*60.0 = 50.0
+    author = _make_author(name="Three-Term Author", h_index_normalized=2.5)
+    paper = Paper.objects.create(
+        title="Three-term hand-computed paper",
+        citation_velocity=20.0,
+        influential_citation_ratio=0.6,
+    )
+    PaperAuthorship.objects.create(paper=paper, author=author, position=1)
+
+    update_paper_combined_score(paper, author)
+    paper.refresh_from_db()
+
+    assert paper.author_reputation_score == pytest.approx(50.0)
+    assert paper.velocity_score == pytest.approx(40.0)
+    assert paper.influential_citation_score == pytest.approx(60.0)
+    assert paper.combined_score == pytest.approx(50.0)
+    assert paper.combined_score == pytest.approx(
+        DEFAULT_REPUTATION_WEIGHT * 50.0
+        + DEFAULT_VELOCITY_WEIGHT * 40.0
+        + DEFAULT_INFLUENTIAL_CITATION_WEIGHT * 60.0
+    )
+
+
+@pytest.mark.django_db
+def test_combined_score_increases_with_influential_citation_ratio_until_saturation():
+    # author_reputation_score and velocity_score held constant throughout.
+    author = _make_author(name="Constant Reputation Author 2", h_index_normalized=1.0)
+
+    def _combined_score_for_ratio(ratio):
+        paper = Paper.objects.create(
+            title=f"Paper (influential_ratio={ratio})",
+            citation_velocity=10.0,
+            influential_citation_ratio=ratio,
+        )
+        PaperAuthorship.objects.create(paper=paper, author=author, position=1)
+        update_paper_combined_score(paper, author)
+        return paper.combined_score
+
+    below_saturation = [0.0, 0.25, 0.5, 1.0]
+    scores = [_combined_score_for_ratio(r) for r in below_saturation]
+    assert scores == sorted(scores)
+    assert len(set(scores)) == len(scores)  # strictly increasing
+
+    # Beyond 1.0 (a malformed ratio), influential_citation_score (and so
+    # combined_score) is already saturated at 100 -- no further increase.
+    saturated_score = _combined_score_for_ratio(1.0)
+    far_beyond_score = _combined_score_for_ratio(5.0)
+    assert saturated_score == far_beyond_score
 
 
 @pytest.mark.django_db
@@ -495,7 +587,7 @@ def test_update_paper_combined_score_save_false_does_not_persist():
     PaperAuthorship.objects.create(paper=paper, author=author, position=1)
 
     update_paper_combined_score(paper, author, save=False)
-    assert paper.combined_score == pytest.approx(45.0)  # computed in-memory
+    assert paper.combined_score == pytest.approx(30.2)  # computed in-memory
 
     paper.refresh_from_db()
     assert paper.combined_score == 0.0  # not persisted

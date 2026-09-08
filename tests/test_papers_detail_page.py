@@ -97,9 +97,11 @@ def test_score_breakdown_shows_hand_computed_values(client):
         venue=venue,
         publication_year=2015,
         citation_velocity=25.0,
+        influential_citation_ratio=0.4,
         author_reputation_score=50.0,  # 2.5 / 5.0 reference max * 100
         velocity_score=50.0,  # 25.0 / 50.0 reference max * 100
-        combined_score=50.0,  # 0.5 * 50.0 + 0.5 * 50.0
+        influential_citation_score=40.0,  # min(0.4, 1.0) * 100
+        combined_score=46.7,  # 0.34*50.0 + 0.33*50.0 + 0.33*40.0
     )
     PaperAuthorship.objects.create(paper=paper, author=author, position=1)
     PaperAuthorship.objects.create(paper=paper, author=other_author, position=2)
@@ -116,8 +118,12 @@ def test_score_breakdown_shows_hand_computed_values(client):
     assert "25.0" in body
     # velocity_score rounded to 1 decimal place.
     assert "50.0" in body
+    # raw influential_citation_ratio rounded to 2 decimal places.
+    assert "0.4" in body
+    # influential_citation_score rounded to 1 decimal place.
+    assert "40.0" in body
     # combined_score rounded to 1 decimal place, shown prominently.
-    assert "Combined score: 50.0" in body
+    assert "Combined score: 46.7" in body
 
 
 @pytest.mark.django_db
@@ -127,7 +133,25 @@ def test_weight_sentence_reflects_default_constants(client):
     response = client.get(f"/papers/{paper.id}/")
     body = response.content.decode()
 
-    assert "Combined score = 50% author reputation + 50% citation velocity." in body
+    assert (
+        "Combined score = 34% author reputation + 33% citation velocity "
+        "+ 33% highly-influential-citation ratio." in body
+    )
+
+
+@pytest.mark.django_db
+def test_unmatched_paper_renders_influential_citation_row_with_zero_fallback(client):
+    # A paper never matched by Semantic Scholar (no DOI, or a DOI with no
+    # Semantic Scholar record) renders the new row with
+    # influential_citation_ratio == 0.0 / influential_citation_score ==
+    # 0.0 -- the field's own defined default, not an error/"N/A".
+    paper = Paper.objects.create(title="Never matched by Semantic Scholar", doi=None)
+
+    response = client.get(f"/papers/{paper.id}/")
+
+    assert response.status_code == 200
+    assert paper.influential_citation_ratio == 0.0
+    assert paper.influential_citation_score == 0.0
 
 
 @pytest.mark.django_db

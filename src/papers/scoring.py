@@ -214,14 +214,45 @@ def update_paper_citation_velocity(
     return paper
 
 
-# --- Combined weighted score (issue #13) ------------------------------------
+# --- Influential-citation ratio (issue #22) ---------------------------------
 #
-# Combines the author-reputation signal (#11's `Author.h_index_normalized`)
-# and the citation-velocity signal (#12's `Paper.citation_velocity`) into a
-# single, transparent, per-paper `combined_score`: a plain weighted sum of
-# two values that are each rescaled to a common 0-100 range first (a fixed
-# linear clamp, not a corpus-relative or learned transform -- see issue
-# #13's Constraints for why).
+# The fraction of a paper's citations that Semantic Scholar flags as
+# "highly influential" -- a third signal so a paper mostly cited in
+# passing (related-work dumps) ranks lower than an equally-cited paper
+# that genuinely shaped its field.
+#
+# Data source: Semantic Scholar's `citation_count`/`influential_citation_count`
+# (via `semantic_scholar_client`, #20), consumed by
+# `fetch_semantic_scholar_embeddings` (#21) and stored as
+# `Paper.influential_citation_ratio` -- neither raw count is itself stored
+# as a `Paper` column (see issue #22's Constraints).
+
+
+def compute_influential_citation_ratio(
+    influential_citation_count: int, citation_count: int
+) -> float:
+    """`influential_citation_count / citation_count`, or `0.0` if undefined.
+
+    `citation_count == 0` is a zero-division guard, and also the correct
+    fallback for "Semantic Scholar had no record at all" (the caller
+    passes `0`/`0` in that case) -- mirroring `compute_citation_velocity`'s
+    / `compute_h_index_normalized`'s existing `0.0`-on-undefined
+    convention.
+    """
+    if citation_count == 0:
+        return 0.0
+    return influential_citation_count / citation_count
+
+
+# --- Combined weighted score (issue #13, extended by #22) -------------------
+#
+# Combines the author-reputation signal (#11's `Author.h_index_normalized`),
+# the citation-velocity signal (#12's `Paper.citation_velocity`), and the
+# influential-citation-ratio signal (#22's `Paper.influential_citation_ratio`)
+# into a single, transparent, per-paper `combined_score`: a plain weighted
+# sum of three values that are each rescaled to a common 0-100 range first
+# (a fixed linear clamp, not a corpus-relative or learned transform -- see
+# issue #13's Constraints for why).
 #
 # Multi-author collapsing: the reputation component is taken from the
 # *first* author only (`PaperAuthorship.position == 1`), not the max or
@@ -229,8 +260,16 @@ def update_paper_citation_velocity(
 # convention that first authorship carries primary credit (see issue #13's
 # Acceptance criteria and #5's Constraints on `PaperAuthorship`).
 
-DEFAULT_REPUTATION_WEIGHT = 0.5
-DEFAULT_VELOCITY_WEIGHT = 0.5
+# Absent real tuning data (same caveat #13's Constraints already carry for
+# the original two weights), equal treatment across all three signals is
+# the least-arbitrary default. Exact equal thirds (1/3 each) can't display
+# as whole percentages summing to 100 (33+33+33 = 99); the spare 1% goes to
+# DEFAULT_REPUTATION_WEIGHT (listed first in the formula) purely so the
+# weight sentence reads 34%+33%+33% = 100% -- a cosmetic tie-break, not a
+# claim that reputation matters more (see issue #22's Acceptance criteria).
+DEFAULT_REPUTATION_WEIGHT = 0.34
+DEFAULT_VELOCITY_WEIGHT = 0.33
+DEFAULT_INFLUENTIAL_CITATION_WEIGHT = 0.33
 
 # Best-guess constants grounded in typical observed ranges (not derived
 # from real ingested data -- see issue #13's Constraints). Revisit once
@@ -255,6 +294,21 @@ def normalize_velocity_score(citation_velocity: float) -> float:
     corpus-relative min-max -- see issue #13's Constraints for why.
     """
     return min(citation_velocity / CITATION_VELOCITY_REFERENCE_MAX, 1.0) * 100
+
+
+def normalize_influential_citation_score(influential_citation_ratio: float) -> float:
+    """Rescale `influential_citation_ratio` to `0-100`, saturating at 100.
+
+    No fixed reference-max is needed here (unlike
+    `h_index_normalized`/`citation_velocity`, which are unbounded above) --
+    a genuine ratio is always `<= 1.0` since "influential" citations are a
+    subset of all citations, so this is just the trivial `* 100`. The
+    `min(..., 1.0)` clamp is kept anyway as a defensive guard against a
+    malformed/inconsistent Semantic Scholar response (e.g.
+    `influential_citation_count > citation_count`) producing a score above
+    the 0-100 range other sub-signals guarantee.
+    """
+    return min(influential_citation_ratio, 1.0) * 100
 
 
 def compute_paper_author_reputation_score(first_author: Author | None) -> float:
@@ -282,33 +336,40 @@ def update_paper_combined_score(
     paper: Paper, first_author: Author | None, save: bool = True
 ) -> Paper:
     """Recompute and store `author_reputation_score`/`velocity_score`/
-    `combined_score` on `paper`.
+    `influential_citation_score`/`combined_score` on `paper`.
 
     `first_author` is the `Author` for `paper`'s position-1 authorship
     (or `None`), resolved by the caller exactly as for
     `compute_paper_author_reputation_score` above. Still reads
-    `paper.citation_velocity` and `first_author.h_index_normalized` as
-    already stored -- it does not itself recompute those sub-signals
-    (that stays #11/#12's job; sequencing multiple papers/authors is
-    #14's job). Convenience wrapper following the same shape as
-    `update_author_h_index` / `update_paper_citation_velocity`. Set
-    `save=False` to compute without writing to the database.
+    `paper.citation_velocity`, `paper.influential_citation_ratio`, and
+    `first_author.h_index_normalized` as already stored -- it does not
+    itself recompute those sub-signals (that stays #11/#12/#22's job;
+    sequencing multiple papers/authors is #14's job). Convenience wrapper
+    following the same shape as `update_author_h_index` /
+    `update_paper_citation_velocity`. Set `save=False` to compute without
+    writing to the database.
     """
     author_reputation_score = compute_paper_author_reputation_score(first_author)
     velocity_score = normalize_velocity_score(paper.citation_velocity)
+    influential_citation_score = normalize_influential_citation_score(
+        paper.influential_citation_ratio
+    )
     combined_score = (
         DEFAULT_REPUTATION_WEIGHT * author_reputation_score
         + DEFAULT_VELOCITY_WEIGHT * velocity_score
+        + DEFAULT_INFLUENTIAL_CITATION_WEIGHT * influential_citation_score
     )
 
     paper.author_reputation_score = author_reputation_score
     paper.velocity_score = velocity_score
+    paper.influential_citation_score = influential_citation_score
     paper.combined_score = combined_score
     if save:
         paper.save(
             update_fields=[
                 "author_reputation_score",
                 "velocity_score",
+                "influential_citation_score",
                 "combined_score",
             ]
         )

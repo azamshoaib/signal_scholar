@@ -9,6 +9,12 @@ unauthenticated rate limit is tight and shared/global, not per-item) and
 stores it on `Paper.embedding` (`pgvector.django.VectorField(dimensions=768)`,
 added directly to `Paper` by this same issue).
 
+Per GitHub issue #22, each matched paper's `Paper.influential_citation_ratio`
+is also computed (`compute_influential_citation_ratio`, from
+`result.influential_citation_count`/`result.citation_count`) and saved
+alongside `embedding`. Neither raw Semantic Scholar count is itself stored
+as a `Paper` column -- only the derived ratio (see issue #22's Constraints).
+
 Batching: doi-having papers are chunked into groups of at most 500 --
 Semantic Scholar's documented hard cap on `POST /paper/batch` -- and each
 chunk's results are saved to the database before the next chunk is
@@ -18,9 +24,11 @@ is nothing to salvage from *within* a failed chunk -- only chunking +
 saving between chunks protects earlier progress).
 
 A DOI Semantic Scholar has no record for comes back as a positional `None`
-in `get_papers`' response (per #20). That paper's `embedding` is left
-untouched (`NULL` on a first run, whatever it already was on a re-run) and
-is counted separately from both "matched" and "skipped (no DOI)".
+in `get_papers`' response (per #20). That paper's `embedding` and
+`influential_citation_ratio` are both left untouched (whatever they
+already held -- `NULL`/`0.0` defaults on a first run, or a stale prior
+value on a re-run) and counted separately from both "matched" and
+"skipped (no DOI)".
 
 `Paper` rows with `doi=None` have no join key (#20's Constraints: DOI is
 the only realistic match key) and are never sent to Semantic Scholar --
@@ -45,6 +53,7 @@ from __future__ import annotations
 from django.core.management.base import BaseCommand, CommandError
 
 from papers.models import Paper
+from papers.scoring import compute_influential_citation_ratio
 from semantic_scholar_client import SemanticScholarClientError, get_papers
 
 # Semantic Scholar's documented hard cap on `POST /paper/batch`: a 501-ID
@@ -98,7 +107,10 @@ class Command(BaseCommand):
                     papers_not_found += 1
                     continue
                 paper.embedding = result.embedding
-                paper.save(update_fields=["embedding"])
+                paper.influential_citation_ratio = compute_influential_citation_ratio(
+                    result.influential_citation_count, result.citation_count
+                )
+                paper.save(update_fields=["embedding", "influential_citation_ratio"])
                 papers_matched += 1
 
             chunks_succeeded += 1

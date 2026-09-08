@@ -316,11 +316,12 @@ def test_matching_query_renders_weight_slider_and_row_data_attributes(client):
     body = response.content.decode()
 
     assert response.status_code == 200
-    # Default weight matches #13's current DEFAULT_REPUTATION_WEIGHT (0.5
-    # -> 50), not a hardcoded literal in the template.
+    # Default weight matches #13's current DEFAULT_REPUTATION_WEIGHT
+    # (0.34 -> 34, updated by #22's three-way weight-split), not a
+    # hardcoded literal in the template.
     assert 'id="weight-slider"' in body
-    assert 'value="50"' in body
-    assert "50% reputation / 50% velocity" in body
+    assert 'value="34"' in body
+    assert "34% reputation / 33% velocity" in body
     assert f'data-paper-id="{paper.id}"' in body
     assert 'data-reputation-score="40.0000"' in body
     assert 'data-velocity-score="20.0000"' in body

@@ -109,6 +109,20 @@ class Paper(models.Model):
     # future similarity search (#23) is a DB query, not a live API call
     # per request.
     embedding = VectorField(dimensions=768, null=True, blank=True)
+    # Semantic Scholar citation-influence data (issue #22):
+    # `influential_citation_ratio` is `influential_citation_count /
+    # citation_count` (both from Semantic Scholar), naturally bounded
+    # 0.0-1.0; stored by `fetch_semantic_scholar_embeddings` alongside
+    # `embedding`. `influential_citation_score` is that ratio rescaled to
+    # 0-100, following the `citation_velocity`/`velocity_score`
+    # raw/normalized naming pattern (#12/#13); only ever written by
+    # `update_paper_combined_score`, never by the fetch command. Both
+    # non-nullable with a `0.0` fallback -- unlike `embedding` above, a
+    # ratio always has a defined value, so this follows the
+    # `citation_velocity`/`velocity_score`/`author_reputation_score`
+    # convention instead.
+    influential_citation_ratio = models.FloatField(default=0.0)
+    influential_citation_score = models.FloatField(default=0.0)
     venue = models.ForeignKey(
         Venue,
         null=True,

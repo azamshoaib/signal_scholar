@@ -35,7 +35,11 @@ from __future__ import annotations
 from django.shortcuts import get_object_or_404, render
 
 from papers.models import Paper
-from papers.scoring import DEFAULT_REPUTATION_WEIGHT, DEFAULT_VELOCITY_WEIGHT
+from papers.scoring import (
+    DEFAULT_INFLUENTIAL_CITATION_WEIGHT,
+    DEFAULT_REPUTATION_WEIGHT,
+    DEFAULT_VELOCITY_WEIGHT,
+)
 from papers.services import search_papers
 
 
@@ -130,9 +134,11 @@ def detail(request, pk):
 
     reputation_weight = round(DEFAULT_REPUTATION_WEIGHT * 100)
     velocity_weight = round(DEFAULT_VELOCITY_WEIGHT * 100)
+    influential_citation_weight = round(DEFAULT_INFLUENTIAL_CITATION_WEIGHT * 100)
     weight_sentence = (
         f"Combined score = {reputation_weight}% author reputation "
-        f"+ {velocity_weight}% citation velocity."
+        f"+ {velocity_weight}% citation velocity "
+        f"+ {influential_citation_weight}% highly-influential-citation ratio."
     )
 
     context = {
@@ -143,6 +149,8 @@ def detail(request, pk):
         "author_reputation_score": round(paper.author_reputation_score, 1),
         "citation_velocity": round(paper.citation_velocity, 2),
         "velocity_score": round(paper.velocity_score, 1),
+        "influential_citation_ratio": round(paper.influential_citation_ratio, 2),
+        "influential_citation_score": round(paper.influential_citation_score, 1),
         "combined_score": round(paper.combined_score, 1),
         "weight_sentence": weight_sentence,
     }

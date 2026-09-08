@@ -33,11 +33,19 @@ def _run_command() -> str:
     return out.getvalue()
 
 
-def _s2_paper(doi: str, embedding: list[float] | None = _EMBEDDING) -> SemanticScholarPaper:
+def _s2_paper(
+    doi: str,
+    embedding: list[float] | None = _EMBEDDING,
+    *,
+    citation_count: int = 100,
+    influential_citation_count: int = 26,
+) -> SemanticScholarPaper:
     return SemanticScholarPaper(
         semantic_scholar_id=f"s2-{doi}",
         doi=doi,
         embedding=embedding,
+        citation_count=citation_count,
+        influential_citation_count=influential_citation_count,
     )
 
 
@@ -48,12 +56,17 @@ def _s2_paper(doi: str, embedding: list[float] | None = _EMBEDDING) -> SemanticS
 @patch(_PATCH_TARGET)
 def test_matched_unmatched_and_no_doi_papers_handled_in_one_call(mock_get_papers):
     matched_paper = Paper.objects.create(title="Matched paper", doi="10.1/matched")
-    unmatched_paper = Paper.objects.create(title="Unmatched paper", doi="10.1/unmatched")
+    unmatched_paper = Paper.objects.create(
+        title="Unmatched paper", doi="10.1/unmatched", influential_citation_ratio=0.42
+    )
     no_doi_paper = Paper.objects.create(title="No DOI paper", doi=None)
 
     # Positionally aligned with the DOIs get_papers is called with below:
     # matched DOI gets a real result, unmatched DOI gets None.
-    mock_get_papers.return_value = [_s2_paper("10.1/matched"), None]
+    mock_get_papers.return_value = [
+        _s2_paper("10.1/matched", citation_count=100, influential_citation_count=26),
+        None,
+    ]
 
     output = _run_command()
 
@@ -62,8 +75,13 @@ def test_matched_unmatched_and_no_doi_papers_handled_in_one_call(mock_get_papers
     no_doi_paper.refresh_from_db()
 
     assert list(matched_paper.embedding) == _EMBEDDING
+    assert matched_paper.influential_citation_ratio == pytest.approx(26 / 100)
     assert unmatched_paper.embedding is None
+    # Unchanged from its pre-run value -- identical "leave untouched"
+    # semantics to embedding on a "no Semantic Scholar match" result.
+    assert unmatched_paper.influential_citation_ratio == pytest.approx(0.42)
     assert no_doi_paper.embedding is None
+    assert no_doi_paper.influential_citation_ratio == 0.0
 
     # get_papers called exactly once, with the full batch of DOIs
     # (doi=None papers excluded) -- not once per paper.
@@ -113,6 +131,23 @@ def test_empty_database_prints_zero_counts_no_errors(mock_get_papers):
     assert "Papers matched: 0" in output
     assert "Papers skipped (no DOI): 0" in output
     assert "No Semantic Scholar match: 0" in output
+
+
+@pytest.mark.django_db
+@patch(_PATCH_TARGET)
+def test_zero_citation_count_falls_back_to_zero_ratio_no_zero_division(mock_get_papers):
+    # citation_count=0 with a *nonzero* influential_citation_count proves
+    # the zero-division guard actually fires, rather than both being
+    # coincidentally zero.
+    paper = Paper.objects.create(title="Uncited paper", doi="10.1/uncited")
+    mock_get_papers.return_value = [
+        _s2_paper("10.1/uncited", citation_count=0, influential_citation_count=3)
+    ]
+
+    _run_command()
+
+    paper.refresh_from_db()
+    assert paper.influential_citation_ratio == 0.0
 
 
 # --- Re-running overwrites unconditionally --------------------------------

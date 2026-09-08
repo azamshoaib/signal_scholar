@@ -26,6 +26,7 @@ from django.test.utils import CaptureQueriesContext
 
 from papers.models import Author, Paper, PaperAuthorship
 from papers.scoring import (
+    DEFAULT_REPUTATION_WEIGHT,
     compute_academic_age,
     compute_h_index,
     compute_h_index_normalized,
@@ -128,7 +129,12 @@ def test_combined_score_uses_freshly_recomputed_h_index_not_stale_value():
     assert expected_reputation_score < 100.0
     assert paper.author_reputation_score == pytest.approx(expected_reputation_score)
     assert paper.author_reputation_score != pytest.approx(100.0)
-    assert paper.combined_score == pytest.approx(0.5 * expected_reputation_score)
+    # citation_velocity and influential_citation_ratio are both 0.0 on this
+    # fixture paper, so only the reputation term contributes (issue #22's
+    # weight-split change: DEFAULT_REPUTATION_WEIGHT is 0.34, not 0.5).
+    assert paper.combined_score == pytest.approx(
+        DEFAULT_REPUTATION_WEIGHT * expected_reputation_score
+    )
 
 
 # --- Idempotency ----------------------------------------------------------
