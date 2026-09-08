@@ -3,6 +3,9 @@
 {% block title %}Log in — SignalScholar{% endblock %}
 
 {% block content %}
+<div class="page">
+  {% include "papers/_nav.html" %}
+
   <h1>Log in</h1>
 
   {% if form.errors %}
@@ -21,4 +24,5 @@
     <input type="hidden" name="next" value="{{ next }}">
     <button type="submit">Log in</button>
   </form>
+</div>
 {% endblock %}

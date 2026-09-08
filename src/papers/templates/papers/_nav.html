@@ -1,0 +1,20 @@
+{% comment %}
+Shared header, included at the top of the content block on every real
+page (search/detail/feed/login) except the landing page, which already
+has its own hero nav baked into home.html's markup.
+{% endcomment %}
+<nav class="site-nav">
+  <a class="site-nav__brand" href="{% url 'home' %}">
+    <span class="site-nav__mark" aria-hidden="true"></span>
+    SignalScholar
+  </a>
+  <div class="site-nav__links">
+    <a href="{% url 'papers:search' %}">Search</a>
+    {% if user.is_authenticated %}
+      <a href="{% url 'papers:feed' %}">Feed</a>
+      <a href="{% url 'logout' %}">Log out</a>
+    {% else %}
+      <a href="{% url 'login' %}">Log in</a>
+    {% endif %}
+  </div>
+</nav>

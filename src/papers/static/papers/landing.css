@@ -1,21 +1,8 @@
 /* Landing page only — scoped to templates/signal_scholar/home.html.
-   Everything else in the app stays intentionally unstyled (see
-   papers/base.html), so nothing here is imported anywhere else. */
-
-@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap");
-
-:root {
-  --bg: #05060a;
-  --bg-alt: #0b0d16;
-  --ink: #eef0fb;
-  --ink-dim: #9aa1c2;
-  --line: #1c2036;
-  --signal-a: #6a5bff;
-  --signal-b: #22e8c8;
-  --signal-c: #ff5b9e;
-  --card: rgba(255, 255, 255, 0.03);
-  --card-border: rgba(255, 255, 255, 0.08);
-}
+   Loaded after app.css (the site-wide theme, which every page including
+   this one already gets via base.html), so it reuses app.css's --bg/
+   --ink/--signal-* variables rather than redeclaring them, and only adds
+   the hero/motion/feature-card treatment that's specific to this page. */
 
 .landing {
   background: var(--bg);

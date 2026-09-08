@@ -3,6 +3,9 @@
 {% block title %}Your feed — SignalScholar{% endblock %}
 
 {% block content %}
+<div class="page">
+  {% include "papers/_nav.html" %}
+
   <h1>Your feed</h1>
 
   {% if not follows_anyone %}
@@ -27,4 +30,5 @@
       {% endfor %}
     </ul>
   {% endif %}
+</div>
 {% endblock %}

@@ -4,6 +4,9 @@
 {% block title %}Search — SignalScholar{% endblock %}
 
 {% block content %}
+<div class="page">
+  {% include "papers/_nav.html" %}
+
   <h1>Search papers</h1>
 
   <form hx-get="{% url 'papers:search' %}" hx-target="#results" hx-push-url="true">
@@ -27,4 +30,5 @@
   </div>
 
   <script src="{% static 'papers/weight_slider.js' %}"></script>
+</div>
 {% endblock %}

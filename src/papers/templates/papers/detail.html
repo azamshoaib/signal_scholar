@@ -3,6 +3,9 @@
 {% block title %}{{ paper.title }} — SignalScholar{% endblock %}
 
 {% block content %}
+<div class="page">
+  {% include "papers/_nav.html" %}
+
   <h1>{{ paper.title }}</h1>
 
   <h2>Authors</h2>
@@ -39,4 +42,5 @@
     Find similar but better papers
   </button>
   <div id="similar-results"></div>
+</div>
 {% endblock %}
