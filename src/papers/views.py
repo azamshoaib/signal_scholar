@@ -78,6 +78,12 @@ def search(request):
         except ValueError as exc:
             error = str(exc)
 
+    # Per #19: the slider's starting position always matches #13's actual
+    # current default weight, rather than a hardcoded copy of today's 0.5
+    # that would silently go stale if #13's constants are ever retuned.
+    default_reputation_weight_pct = round(DEFAULT_REPUTATION_WEIGHT * 100)
+    default_velocity_weight_pct = round(DEFAULT_VELOCITY_WEIGHT * 100)
+
     context = {
         "q": q,
         "year_min": year_min,
@@ -87,6 +93,8 @@ def search(request):
         "count": count,
         "searched": searched,
         "error": error,
+        "default_reputation_weight_pct": default_reputation_weight_pct,
+        "default_velocity_weight_pct": default_velocity_weight_pct,
     }
 
     if request.headers.get("HX-Request") == "true":

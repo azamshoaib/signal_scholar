@@ -1,4 +1,5 @@
 {% extends "papers/base.html" %}
+{% load static %}
 
 {% block title %}Search — SignalScholar{% endblock %}
 
@@ -24,4 +25,6 @@
   <div id="results">
     {% include "papers/_results.html" %}
   </div>
+
+  <script src="{% static 'papers/weight_slider.js' %}"></script>
 {% endblock %}

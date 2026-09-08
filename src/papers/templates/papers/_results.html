@@ -6,12 +6,20 @@
   <p>No papers found for "{{ q }}". Try a different search term.</p>
 {% else %}
   <p>Showing {{ results|length }} of {{ count }} results.</p>
-  <ul>
+
+  <label for="weight-slider">
+    <span id="weight-label">{{ default_reputation_weight_pct }}% reputation / {{ default_velocity_weight_pct }}% velocity</span>
+  </label>
+  <input type="range" id="weight-slider" min="0" max="100" value="{{ default_reputation_weight_pct }}">
+
+  <ul id="results-list">
     {% for paper in results %}
-      <li>
+      <li data-paper-id="{{ paper.id }}"
+          data-reputation-score="{{ paper.author_reputation_score|floatformat:4 }}"
+          data-velocity-score="{{ paper.velocity_score|floatformat:4 }}">
         <h3><a href="{% url 'papers:detail' paper.id %}">{{ paper.title }}</a></h3>
         <p>{{ paper.first_author_name }} &middot; {{ paper.venue_name }} &middot; {{ paper.publication_year }}</p>
-        <p>Score: {{ paper.combined_score|floatformat:1 }}</p>
+        <p><span class="score-value">Score: {{ paper.combined_score|floatformat:1 }}</span></p>
       </li>
     {% endfor %}
   </ul>

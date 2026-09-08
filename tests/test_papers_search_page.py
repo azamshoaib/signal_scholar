@@ -78,6 +78,9 @@ def test_htmx_request_returns_only_partial_not_full_page_chrome(client):
     assert "<form" not in body
     assert "<html" not in body
     assert "Robotics and control systems" in body
+    # The weight_slider.js <script> tag is page chrome (loaded once in
+    # search.html, outside #results), not part of the swapped partial.
+    assert "weight_slider.js" not in body
 
 
 @pytest.mark.django_db
@@ -290,3 +293,63 @@ def test_omitting_all_filters_reproduces_prior_behavior(client):
     assert response.status_code == 200
     assert "Robotics paper" in body
     assert "Showing 1 of 1 results." in body
+
+
+# --- GitHub issue #19: adjustable-weights slider to re-sort results ---
+
+
+@pytest.mark.django_db
+def test_matching_query_renders_weight_slider_and_row_data_attributes(client):
+    venue = Venue.objects.create(name="NeurIPS")
+    author = Author.objects.create(name="Ada Lovelace", h_index_normalized=2.0)
+    paper = Paper.objects.create(
+        title="Analytical engines and computation",
+        publication_year=2020,
+        venue=venue,
+        author_reputation_score=40.0,
+        velocity_score=20.0,
+        combined_score=30.0,
+    )
+    PaperAuthorship.objects.create(paper=paper, author=author, position=1)
+
+    response = client.get("/search/", {"q": "analytical"})
+    body = response.content.decode()
+
+    assert response.status_code == 200
+    # Default weight matches #13's current DEFAULT_REPUTATION_WEIGHT (0.5
+    # -> 50), not a hardcoded literal in the template.
+    assert 'id="weight-slider"' in body
+    assert 'value="50"' in body
+    assert "50% reputation / 50% velocity" in body
+    assert f'data-paper-id="{paper.id}"' in body
+    assert 'data-reputation-score="40.0000"' in body
+    assert 'data-velocity-score="20.0000"' in body
+
+
+@pytest.mark.django_db
+def test_zero_results_renders_no_weight_slider(client):
+    Paper.objects.create(title="Something about biology")
+
+    response = client.get("/search/", {"q": "nonexistent-xyz-term"})
+    body = response.content.decode()
+
+    assert response.status_code == 200
+    assert 'id="weight-slider"' not in body
+
+
+@pytest.mark.django_db
+def test_no_query_renders_no_weight_slider(client):
+    response = client.get("/search/")
+    body = response.content.decode()
+
+    assert response.status_code == 200
+    assert 'id="weight-slider"' not in body
+
+
+@pytest.mark.django_db
+def test_full_page_request_includes_weight_slider_script_tag(client):
+    response = client.get("/search/")
+    body = response.content.decode()
+
+    assert response.status_code == 200
+    assert "weight_slider.js" in body
