@@ -15,11 +15,19 @@ into Ninja's `HttpError` and shapes the JSON response.
 
 from __future__ import annotations
 
+from django.shortcuts import get_object_or_404
 from ninja import Query, Router
 from ninja.errors import HttpError
 
-from papers.schemas import PaperSearchResponseSchema
-from papers.services import DEFAULT_LIMIT, search_papers
+from papers.models import Paper
+from papers.schemas import PaperSearchResponseSchema, SimilarPapersResponseSchema
+from papers.services import (
+    CANDIDATE_POOL_SIZE,
+    DEFAULT_LIMIT,
+    RESULT_COUNT,
+    find_similar_papers,
+    search_papers,
+)
 
 router = Router()
 
@@ -64,3 +72,41 @@ def search(
         raise HttpError(400, str(exc)) from None
 
     return {"results": results, "count": count}
+
+
+@router.get("/papers/{paper_id}/similar", response=SimilarPapersResponseSchema)
+def similar(request, paper_id: int):
+    """Find papers similar to `paper_id`, re-ranked by quality.
+
+    Per GitHub issue #23, this is the "paper-in, papers-out" entry point:
+    given a paper already in the local database, return other
+    locally-ingested papers that are semantically similar to it (#21's
+    stored SPECTER v2 embeddings, via a pgvector cosine-distance query),
+    re-ordered so a highly similar but low-quality paper ranks below a
+    less similar but higher-quality one (#13/#22's `combined_score`) --
+    a real two-stage "similar, then better" ranking, not a plain
+    nearest-neighbor list. The actual query logic lives in
+    `papers.services.find_similar_papers`, mirroring `search_papers`'s
+    existing HTTP-shaping/query-logic split.
+
+    A `paper_id` that doesn't correspond to any `Paper` row returns
+    `404` (via `get_object_or_404`, mirroring `papers.views.detail`'s
+    convention). A `paper_id` that exists but whose `embedding IS NULL`
+    (never matched by Semantic Scholar -- see #21) returns `422`,
+    deliberately distinct from the `404` above so a caller can
+    distinguish "this paper doesn't exist" from "this paper exists but
+    can't be compared yet" without parsing message text.
+    """
+    paper = get_object_or_404(Paper.objects.all(), pk=paper_id)
+    if paper.embedding is None:
+        raise HttpError(
+            422,
+            f"Paper {paper_id} has no stored embedding yet -- it cannot be "
+            "compared for similarity.",
+        )
+
+    results = find_similar_papers(
+        paper, candidate_pool_size=CANDIDATE_POOL_SIZE, result_count=RESULT_COUNT
+    )
+
+    return {"source_paper_id": paper.id, "results": results}

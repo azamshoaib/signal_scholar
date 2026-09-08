@@ -43,3 +43,38 @@ class PaperSearchResponseSchema(Schema):
 
     results: list[PaperSearchResultSchema]
     count: int
+
+
+class SimilarPaperResultSchema(PaperSearchResultSchema):
+    """One paper in a `GET /api/papers/{paper_id}/similar` result set.
+
+    Extends (not duplicates) `PaperSearchResultSchema`'s shape, adding
+    `similarity_score` -- per GitHub issue #23. `similarity_score` is
+    `1 - cosine_distance` (i.e. cosine similarity itself: higher = more
+    similar), returned at full float precision, deliberately *not*
+    rescaled to the 0-100 range `author_reputation_score`/
+    `velocity_score`/`combined_score` use, so it reads as "how similar"
+    rather than being mistaken for another quality signal. Continues
+    #17's transparency precedent (raw signal shown next to normalized/
+    derived signal), applied here so a caller can see *why* a
+    lower-`combined_score` result still outranks a higher-`combined_score`
+    one that didn't make the candidate pool at all.
+    """
+
+    similarity_score: float
+
+
+class SimilarPapersResponseSchema(Schema):
+    """The `GET /api/papers/{paper_id}/similar` response envelope.
+
+    No `count` field (unlike `PaperSearchResponseSchema`): `count` there
+    exists to communicate truncation from a larger total match count;
+    here `results` is never a truncated view of a larger *result* set in
+    that sense (`len(results) <= RESULT_COUNT` is already
+    self-describing), so a `count` field would be redundant.
+    `source_paper_id` is included so a consumer that doesn't separately
+    retain the requested id still has it on the response.
+    """
+
+    source_paper_id: int
+    results: list[SimilarPaperResultSchema]

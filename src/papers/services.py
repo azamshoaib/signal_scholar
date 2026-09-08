@@ -10,11 +10,18 @@ callers.
 from __future__ import annotations
 
 from django.db.models import Q
+from pgvector.django import CosineDistance
 
 from papers.models import Paper
 
 DEFAULT_LIMIT = 25
 MAX_LIMIT = 100
+
+# Per GitHub issue #23: fixed module-level constants, not query
+# parameters -- see that issue's "Out of scope" for why making these
+# configurable is deliberately deferred rather than built speculatively.
+CANDIDATE_POOL_SIZE = 20
+RESULT_COUNT = 10
 
 
 def search_papers(
@@ -109,3 +116,80 @@ def search_papers(
         )
 
     return results, count
+
+
+def find_similar_papers(
+    paper: Paper,
+    candidate_pool_size: int = CANDIDATE_POOL_SIZE,
+    result_count: int = RESULT_COUNT,
+) -> list[dict]:
+    """Find papers similar to `paper`, then re-rank that pool by quality.
+
+    Per GitHub issue #23, this is a two-stage "similar, then better"
+    query: first fetch the `candidate_pool_size` nearest neighbors to
+    `paper.embedding` by cosine distance (via `pgvector.django`'s
+    `CosineDistance`, which returns `1 - cosine_similarity` -- lower is
+    more similar), excluding `paper` itself and any `Paper` with
+    `embedding IS NULL`; then re-sort that pool by `combined_score`
+    descending and return the top `result_count`. This is what makes the
+    endpoint "similar but better" rather than a plain nearest-neighbor
+    list: a highly similar but low-quality paper can rank below a less
+    similar but higher-quality one, as long as both are in the pool.
+
+    Callers are responsible for checking `paper.embedding is not None`
+    before calling this -- exactly as `search_papers`'s `ValueError`-to-
+    `HttpError` translation stays in `papers.api`, not here, the 404-vs-
+    422 HTTP-shaping decision for a source paper with no embedding
+    belongs in the caller, not this HTTP-agnostic function.
+
+    The candidate-pool query orders by `(distance, id)` and the re-rank
+    step orders by `(-combined_score, id)` -- both with an explicit `id`
+    tiebreaker, matching `search_papers`'s deterministic-ordering
+    convention so ordering assertions in tests aren't flaky.
+
+    If fewer than `candidate_pool_size` other papers have a non-null
+    `embedding`, the candidate pool is simply smaller (no error, no
+    padding); if fewer than `result_count` candidates survive into the
+    pool, all of them are returned (no error).
+
+    Uses `.select_related("venue").prefetch_related("authorships__author")`
+    on the candidate-pool query, with `first_author_name` resolved from
+    the prefetched `authorships` manager's bare `.all()`, matching
+    `search_papers`'s existing N+1-safe pattern exactly.
+    """
+    candidates = (
+        Paper.objects.select_related("venue")
+        .prefetch_related("authorships__author")
+        .exclude(pk=paper.pk)
+        .filter(embedding__isnull=False)
+        .annotate(distance=CosineDistance("embedding", paper.embedding))
+        .order_by("distance", "id")[:candidate_pool_size]
+    )
+
+    pool = list(candidates)
+    pool.sort(key=lambda candidate: (-candidate.combined_score, candidate.id))
+
+    results = []
+    for candidate in pool[:result_count]:
+        # Bare `.all()` on the prefetched `authorships` manager reuses the
+        # prefetch cache -- never `.order_by()`/`.filter()`/`.first()`
+        # here, per `search_papers`'s same N+1-avoidance reasoning.
+        authorships = list(candidate.authorships.all())
+        first_author_name = authorships[0].author.name if authorships else None
+        results.append(
+            {
+                "id": candidate.id,
+                "title": candidate.title,
+                "publication_year": candidate.publication_year,
+                "doi": candidate.doi,
+                "venue_name": candidate.venue.name if candidate.venue else None,
+                "first_author_name": first_author_name,
+                "citation_velocity": candidate.citation_velocity,
+                "author_reputation_score": candidate.author_reputation_score,
+                "velocity_score": candidate.velocity_score,
+                "combined_score": candidate.combined_score,
+                "similarity_score": 1 - candidate.distance,
+            }
+        )
+
+    return results
