@@ -14,6 +14,7 @@ already creates the index we'd otherwise add via ``db_index``.
 
 from django.db import models
 from django.db.models import CheckConstraint, Q
+from pgvector.django import VectorField
 
 
 class Institution(models.Model):
@@ -97,6 +98,17 @@ class Paper(models.Model):
     author_reputation_score = models.FloatField(default=0.0)
     velocity_score = models.FloatField(default=0.0)
     combined_score = models.FloatField(default=0.0)
+    # Semantic Scholar's SPECTER v2 embedding (issue #21), fetched and
+    # stored by `fetch_semantic_scholar_embeddings` via
+    # `semantic_scholar_client.get_papers`, keyed on `doi` — the only
+    # realistic join key (#20's Constraints). `null=True`/`blank=True`
+    # since a paper with no `doi`, or one Semantic Scholar has no record
+    # for, has no embedding to store. 768 dimensions, matching #20's
+    # confirmed-live `embedding.specter_v2` shape (not #3's smoke-test
+    # `dimensions=3`). Stored here rather than computed on read so a
+    # future similarity search (#23) is a DB query, not a live API call
+    # per request.
+    embedding = VectorField(dimensions=768, null=True, blank=True)
     venue = models.ForeignKey(
         Venue,
         null=True,
