@@ -212,3 +212,94 @@ def update_paper_citation_velocity(
     if save:
         paper.save(update_fields=["citation_velocity"])
     return paper
+
+
+# --- Combined weighted score (issue #13) ------------------------------------
+#
+# Combines the author-reputation signal (#11's `Author.h_index_normalized`)
+# and the citation-velocity signal (#12's `Paper.citation_velocity`) into a
+# single, transparent, per-paper `combined_score`: a plain weighted sum of
+# two values that are each rescaled to a common 0-100 range first (a fixed
+# linear clamp, not a corpus-relative or learned transform -- see issue
+# #13's Constraints for why).
+#
+# Multi-author collapsing: the reputation component is taken from the
+# *first* author only (`PaperAuthorship.position == 1`), not the max or
+# average across all of a paper's authors -- matching the academic
+# convention that first authorship carries primary credit (see issue #13's
+# Acceptance criteria and #5's Constraints on `PaperAuthorship`).
+
+DEFAULT_REPUTATION_WEIGHT = 0.5
+DEFAULT_VELOCITY_WEIGHT = 0.5
+
+# Best-guess constants grounded in typical observed ranges (not derived
+# from real ingested data -- see issue #13's Constraints). Revisit once
+# real data from #9/#34's ingestion is available.
+H_INDEX_NORMALIZED_REFERENCE_MAX = 5.0
+CITATION_VELOCITY_REFERENCE_MAX = 50.0
+
+
+def normalize_h_index_score(h_index_normalized: float) -> float:
+    """Rescale `h_index_normalized` to `0-100`, saturating at 100.
+
+    A fixed linear clamp against `H_INDEX_NORMALIZED_REFERENCE_MAX`, not a
+    corpus-relative min-max -- see issue #13's Constraints for why.
+    """
+    return min(h_index_normalized / H_INDEX_NORMALIZED_REFERENCE_MAX, 1.0) * 100
+
+
+def normalize_velocity_score(citation_velocity: float) -> float:
+    """Rescale `citation_velocity` to `0-100`, saturating at 100.
+
+    A fixed linear clamp against `CITATION_VELOCITY_REFERENCE_MAX`, not a
+    corpus-relative min-max -- see issue #13's Constraints for why.
+    """
+    return min(citation_velocity / CITATION_VELOCITY_REFERENCE_MAX, 1.0) * 100
+
+
+def compute_paper_author_reputation_score(paper: Paper) -> float:
+    """Normalized reputation score derived from `paper`'s first author only.
+
+    Reads `paper.authorships.order_by("position").first()` (position == 1
+    for a properly-ordered paper; `PaperAuthorship.Meta.ordering` already
+    defaults to `["position"]`, the explicit `order_by` here just makes
+    that intent visible) and normalizes that author's `h_index_normalized`.
+    A paper with zero `PaperAuthorship` rows returns `0.0` -- a defined
+    fallback, not an error, mirroring #11/#12's convention.
+    """
+    first_authorship = paper.authorships.order_by("position").first()
+    if first_authorship is None:
+        return 0.0
+    return normalize_h_index_score(first_authorship.author.h_index_normalized)
+
+
+def update_paper_combined_score(paper: Paper, save: bool = True) -> Paper:
+    """Recompute and store `author_reputation_score`/`velocity_score`/
+    `combined_score` on `paper`.
+
+    Reads `paper.citation_velocity` and the first author's
+    `h_index_normalized` as already stored -- it does not itself
+    recompute those sub-signals (that stays #11/#12's job; sequencing
+    multiple papers/authors is #14's job). Convenience wrapper following
+    the same shape as `update_author_h_index` / `update_paper_citation_velocity`.
+    Set `save=False` to compute without writing to the database.
+    """
+    author_reputation_score = compute_paper_author_reputation_score(paper)
+    velocity_score = normalize_velocity_score(paper.citation_velocity)
+    combined_score = (
+        DEFAULT_REPUTATION_WEIGHT * author_reputation_score
+        + DEFAULT_VELOCITY_WEIGHT * velocity_score
+    )
+
+    paper.author_reputation_score = author_reputation_score
+    paper.velocity_score = velocity_score
+    paper.combined_score = combined_score
+    if save:
+        paper.save(
+            update_fields=[
+                "author_reputation_score",
+                "velocity_score",
+                "combined_score",
+            ]
+        )
+    return paper

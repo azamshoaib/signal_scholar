@@ -11,15 +11,23 @@ import pytest
 
 from papers.models import Author, Paper, PaperAuthorship
 from papers.scoring import (
+    CITATION_VELOCITY_REFERENCE_MAX,
+    DEFAULT_REPUTATION_WEIGHT,
+    DEFAULT_VELOCITY_WEIGHT,
+    H_INDEX_NORMALIZED_REFERENCE_MAX,
     compute_academic_age,
     compute_author_h_index_scores,
     compute_citation_velocity,
     compute_h_index,
     compute_h_index_normalized,
+    compute_paper_author_reputation_score,
     compute_paper_citation_velocity,
     compute_years_since_publication,
+    normalize_h_index_score,
+    normalize_velocity_score,
     update_author_h_index,
     update_paper_citation_velocity,
+    update_paper_combined_score,
 )
 
 CURRENT_YEAR = 2026
@@ -306,3 +314,188 @@ def test_recent_paper_not_penalized_relative_to_older_paper():
     assert recent_velocity == pytest.approx(20.0)
     assert older_velocity == pytest.approx(20.0)
     assert recent_velocity == older_velocity
+
+
+# --- Combined weighted score (issue #13) ------------------------------------
+#
+# Fixtures set `h_index_normalized`/`citation_velocity` directly on
+# hand-built `Author`/`Paper`/`PaperAuthorship` rows -- these tests exercise
+# `update_paper_combined_score`'s "reads already-stored sub-signals" job,
+# not #11/#12's own computation of those sub-signals.
+
+
+def _make_author(*, name, h_index_normalized):
+    return Author.objects.create(name=name, h_index_normalized=h_index_normalized)
+
+
+# --- Pure-function unit tests (no DB) --------------------------------------
+
+
+def test_normalize_h_index_score_linear_clamp_and_saturation():
+    assert normalize_h_index_score(0.0) == 0.0
+    assert normalize_h_index_score(2.5) == pytest.approx(50.0)
+    assert normalize_h_index_score(H_INDEX_NORMALIZED_REFERENCE_MAX) == pytest.approx(100.0)
+    # Far above the reference max -> saturates at 100, not unbounded.
+    assert normalize_h_index_score(20.0) == 100.0
+
+
+def test_normalize_velocity_score_linear_clamp_and_saturation():
+    assert normalize_velocity_score(0.0) == 0.0
+    assert normalize_velocity_score(25.0) == pytest.approx(50.0)
+    assert normalize_velocity_score(CITATION_VELOCITY_REFERENCE_MAX) == pytest.approx(100.0)
+    # Far above the reference max -> saturates at 100, not unbounded.
+    assert normalize_velocity_score(500.0) == 100.0
+
+
+# --- Required scenarios, against real DB fixtures ---------------------------
+
+
+@pytest.mark.django_db
+def test_combined_score_increases_with_velocity_until_saturation():
+    # author_reputation_score held constant throughout.
+    author = _make_author(name="Constant Reputation Author", h_index_normalized=1.0)
+
+    def _combined_score_for_velocity(velocity):
+        paper = Paper.objects.create(
+            title=f"Paper (velocity={velocity})", citation_velocity=velocity
+        )
+        PaperAuthorship.objects.create(paper=paper, author=author, position=1)
+        update_paper_combined_score(paper)
+        return paper.combined_score
+
+    below_saturation = [0.0, 10.0, 25.0, CITATION_VELOCITY_REFERENCE_MAX]
+    scores = [_combined_score_for_velocity(v) for v in below_saturation]
+    assert scores == sorted(scores)
+    assert len(set(scores)) == len(scores)  # strictly increasing
+
+    # Beyond the reference max, velocity_score (and so combined_score) is
+    # already saturated at 100 -- no further increase.
+    saturated_score = _combined_score_for_velocity(CITATION_VELOCITY_REFERENCE_MAX)
+    far_beyond_score = _combined_score_for_velocity(500.0)
+    assert saturated_score == far_beyond_score
+
+
+@pytest.mark.django_db
+def test_combined_score_increases_with_reputation_until_saturation():
+    # citation_velocity held constant throughout.
+    velocity = 10.0
+
+    def _combined_score_for_h_index_normalized(h_index_normalized):
+        author = _make_author(
+            name=f"Author (h_norm={h_index_normalized})",
+            h_index_normalized=h_index_normalized,
+        )
+        paper = Paper.objects.create(
+            title=f"Paper (h_norm={h_index_normalized})", citation_velocity=velocity
+        )
+        PaperAuthorship.objects.create(paper=paper, author=author, position=1)
+        update_paper_combined_score(paper)
+        return paper.combined_score
+
+    below_saturation = [0.0, 1.0, 2.5, H_INDEX_NORMALIZED_REFERENCE_MAX]
+    scores = [_combined_score_for_h_index_normalized(h) for h in below_saturation]
+    assert scores == sorted(scores)
+    assert len(set(scores)) == len(scores)  # strictly increasing
+
+    # Beyond the reference max, author_reputation_score (and so
+    # combined_score) is already saturated at 100 -- no further increase.
+    saturated_score = _combined_score_for_h_index_normalized(H_INDEX_NORMALIZED_REFERENCE_MAX)
+    far_beyond_score = _combined_score_for_h_index_normalized(20.0)
+    assert saturated_score == far_beyond_score
+
+
+@pytest.mark.django_db
+def test_author_reputation_score_uses_first_author_only_not_max_or_average():
+    # First author has a high h_index_normalized; one coauthor is lower,
+    # one coauthor is *higher* -- so MAX and AVERAGE would both disagree
+    # with "first author only" here, pinning the collapsing-rule decision.
+    first_author = _make_author(name="First Author", h_index_normalized=2.0)
+    lower_coauthor = _make_author(name="Lower Coauthor", h_index_normalized=0.5)
+    higher_coauthor = _make_author(name="Higher Coauthor", h_index_normalized=4.0)
+
+    paper = Paper.objects.create(title="Multi-author paper", citation_velocity=0.0)
+    PaperAuthorship.objects.create(paper=paper, author=first_author, position=1)
+    PaperAuthorship.objects.create(paper=paper, author=lower_coauthor, position=2)
+    PaperAuthorship.objects.create(paper=paper, author=higher_coauthor, position=3)
+
+    score = compute_paper_author_reputation_score(paper)
+
+    expected_first_author_score = normalize_h_index_score(2.0)
+    what_max_would_give = normalize_h_index_score(4.0)
+    what_average_would_give = normalize_h_index_score((2.0 + 0.5 + 4.0) / 3)
+
+    assert score == pytest.approx(expected_first_author_score)
+    assert score != pytest.approx(what_max_would_give)
+    assert score != pytest.approx(what_average_would_give)
+
+
+@pytest.mark.django_db
+def test_zero_authorship_paper_reputation_score_zero_and_combined_drops_term():
+    # No PaperAuthorship rows at all (allowed per #5's schema).
+    paper = Paper.objects.create(title="No authors", citation_velocity=20.0)
+
+    assert compute_paper_author_reputation_score(paper) == 0.0
+
+    update_paper_combined_score(paper)
+    paper.refresh_from_db()
+
+    expected_velocity_score = normalize_velocity_score(20.0)
+    assert paper.author_reputation_score == 0.0
+    assert paper.velocity_score == pytest.approx(expected_velocity_score)
+    # Reputation term drops out cleanly -- combined_score is exactly the
+    # velocity term alone.
+    assert paper.combined_score == pytest.approx(
+        DEFAULT_VELOCITY_WEIGHT * expected_velocity_score
+    )
+
+
+@pytest.mark.django_db
+def test_paper_with_outlier_velocity_and_reputation_both_saturate_at_100():
+    # citation_velocity far above CITATION_VELOCITY_REFERENCE_MAX (e.g. 500)
+    # and h_index_normalized far above H_INDEX_NORMALIZED_REFERENCE_MAX
+    # (e.g. 20) both saturate at 100, not unbounded.
+    outlier_author = _make_author(name="Outlier Author", h_index_normalized=20.0)
+    paper = Paper.objects.create(title="Outlier paper", citation_velocity=500.0)
+    PaperAuthorship.objects.create(paper=paper, author=outlier_author, position=1)
+
+    update_paper_combined_score(paper)
+    paper.refresh_from_db()
+
+    assert paper.author_reputation_score == 100.0
+    assert paper.velocity_score == 100.0
+    assert paper.combined_score == pytest.approx(100.0)
+
+
+@pytest.mark.django_db
+def test_combined_score_hand_computed_example():
+    # first author h_index_normalized = 2.5
+    #   -> normalize_h_index_score(2.5) = min(2.5/5.0, 1.0)*100 = 50.0
+    # paper citation_velocity = 20.0
+    #   -> normalize_velocity_score(20.0) = min(20.0/50.0, 1.0)*100 = 40.0
+    # combined_score = 0.5*50.0 + 0.5*40.0 = 45.0
+    author = _make_author(name="Hand-Computed Author", h_index_normalized=2.5)
+    paper = Paper.objects.create(title="Hand-computed paper", citation_velocity=20.0)
+    PaperAuthorship.objects.create(paper=paper, author=author, position=1)
+
+    update_paper_combined_score(paper)
+    paper.refresh_from_db()
+
+    assert paper.author_reputation_score == pytest.approx(50.0)
+    assert paper.velocity_score == pytest.approx(40.0)
+    assert paper.combined_score == pytest.approx(45.0)
+    assert paper.combined_score == pytest.approx(
+        DEFAULT_REPUTATION_WEIGHT * 50.0 + DEFAULT_VELOCITY_WEIGHT * 40.0
+    )
+
+
+@pytest.mark.django_db
+def test_update_paper_combined_score_save_false_does_not_persist():
+    author = _make_author(name="Author", h_index_normalized=2.5)
+    paper = Paper.objects.create(title="Paper", citation_velocity=20.0)
+    PaperAuthorship.objects.create(paper=paper, author=author, position=1)
+
+    update_paper_combined_score(paper, save=False)
+    assert paper.combined_score == pytest.approx(45.0)  # computed in-memory
+
+    paper.refresh_from_db()
+    assert paper.combined_score == 0.0  # not persisted

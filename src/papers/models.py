@@ -88,6 +88,15 @@ class Paper(models.Model):
     # for the same reason as `Author.h_index_normalized` (#11) —
     # recomputation is its own concern (#14/#28); see `papers.scoring`.
     citation_velocity = models.FloatField(default=0.0)
+    # Combined-score sub-signals and final ranking value (issue #13):
+    # `author_reputation_score` is the first author's `h_index_normalized`
+    # rescaled to 0-100; `velocity_score` is `citation_velocity` rescaled
+    # to 0-100; `combined_score` is their weighted sum. Stored (not
+    # computed on read) for the same reason as `citation_velocity` above
+    # -- recomputation is its own concern (#14/#28); see `papers.scoring`.
+    author_reputation_score = models.FloatField(default=0.0)
+    velocity_score = models.FloatField(default=0.0)
+    combined_score = models.FloatField(default=0.0)
     venue = models.ForeignKey(
         Venue,
         null=True,
