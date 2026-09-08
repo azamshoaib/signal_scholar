@@ -1,0 +1,16 @@
+{% if not searched %}
+  <p>Enter a topic to search.</p>
+{% elif count == 0 %}
+  <p>No papers found for "{{ q }}". Try a different search term.</p>
+{% else %}
+  <p>Showing {{ results|length }} of {{ count }} results.</p>
+  <ul>
+    {% for paper in results %}
+      <li>
+        <h3>{{ paper.title }}</h3>
+        <p>{{ paper.first_author_name }} &middot; {{ paper.venue_name }} &middot; {{ paper.publication_year }}</p>
+        <p>Score: {{ paper.combined_score|floatformat:1 }}</p>
+      </li>
+    {% endfor %}
+  </ul>
+{% endif %}

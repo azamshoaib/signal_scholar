@@ -9,7 +9,7 @@ GitHub issue #7.
 
 from django.contrib import admin
 from django.http import HttpResponse
-from django.urls import path
+from django.urls import include, path
 
 from signal_scholar.api import api
 
@@ -20,6 +20,7 @@ def home(request):
 
 urlpatterns = [
     path("", home, name="home"),
+    path("", include("papers.urls")),
     path("api/", api.urls),
     path("admin/", admin.site.urls),
 ]

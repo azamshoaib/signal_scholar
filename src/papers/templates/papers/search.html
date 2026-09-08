@@ -1,0 +1,17 @@
+{% extends "papers/base.html" %}
+
+{% block title %}Search — SignalScholar{% endblock %}
+
+{% block content %}
+  <h1>Search papers</h1>
+
+  <form hx-get="{% url 'papers:search' %}" hx-target="#results" hx-push-url="true">
+    <label for="q">Topic</label>
+    <input type="text" id="q" name="q" value="{{ q }}">
+    <button type="submit">Search</button>
+  </form>
+
+  <div id="results">
+    {% include "papers/_results.html" %}
+  </div>
+{% endblock %}
