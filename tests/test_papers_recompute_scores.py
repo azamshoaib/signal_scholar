@@ -31,6 +31,7 @@ from papers.scoring import (
     compute_h_index,
     compute_h_index_normalized,
     normalize_h_index_score,
+    update_paper_combined_score,
 )
 
 TODAY_YEAR = datetime.date.today().year
@@ -135,6 +136,44 @@ def test_combined_score_uses_freshly_recomputed_h_index_not_stale_value():
     assert paper.combined_score == pytest.approx(
         DEFAULT_REPUTATION_WEIGHT * expected_reputation_score
     )
+
+
+# --- Regression: influential_citation_score must not go stale (#22 QA FAIL) -
+
+
+@pytest.mark.django_db
+def test_recompute_updates_stale_influential_citation_score_in_db():
+    # Establish a baseline stored influential_citation_score via the normal
+    # scoring path (influential_citation_ratio=0.2 -> influential_citation_score=20.0).
+    author = Author.objects.create(name="Ratio Author")
+    paper = Paper.objects.create(
+        title="Paper with an influential-citation ratio",
+        cited_by_count=0,
+        publication_year=TODAY_YEAR,
+        citation_velocity=0.0,
+        influential_citation_ratio=0.2,
+    )
+    PaperAuthorship.objects.create(paper=paper, author=author, position=1)
+    update_paper_combined_score(paper, author, save=True)
+    paper.refresh_from_db()
+    assert paper.influential_citation_score == pytest.approx(20.0)
+
+    # Simulate what a fresh fetch_semantic_scholar_embeddings re-run would
+    # do: only the raw ratio is updated and saved, leaving the previously
+    # stored (now stale) influential_citation_score at 20.0 until something
+    # recomputes it.
+    paper.influential_citation_ratio = 0.9
+    paper.save(update_fields=["influential_citation_ratio"])
+
+    _run_command()
+
+    # Re-fetch from the DB (not the in-memory instance) -- this is the
+    # assertion that catches the bug: a combined_score-only check would
+    # pass even when the buggy update_fields list silently discards the
+    # freshly-recomputed influential_citation_score before it reaches the
+    # database.
+    stored = Paper.objects.get(pk=paper.pk)
+    assert stored.influential_citation_score == pytest.approx(90.0)
 
 
 # --- Idempotency ----------------------------------------------------------

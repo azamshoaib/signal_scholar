@@ -86,6 +86,7 @@ class Command(BaseCommand):
                     "citation_velocity",
                     "author_reputation_score",
                     "velocity_score",
+                    "influential_citation_score",
                     "combined_score",
                 ]
             )
